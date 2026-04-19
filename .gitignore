@@ -1,0 +1,68 @@
+# ─── Python (omnivex/) ───────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+*.so
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Environment variables — NEVER commit these
+.env
+.env.local
+.env.*.local
+*.env
+
+# Logs and outputs (generated at runtime)
+omnivex/logs/
+omnivex/reports/
+omnivex/output/
+
+# ─── Node / Next.js (omnivex-web/) ───────────────────────────────────────────
+node_modules/
+omnivex-web/.next/
+omnivex-web/out/
+omnivex-web/.vercel/
+
+# Next.js build output
+omnivex-web/build/
+
+# ─── OS ──────────────────────────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# ─── IDE ─────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ─── Secrets / Keys ──────────────────────────────────────────────────────────
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+credentials/
+
+# ─── Data files (may contain sensitive portfolio data) ───────────────────────
+*.csv
+*.sqlite
+*.db
