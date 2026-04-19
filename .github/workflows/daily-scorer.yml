@@ -54,6 +54,24 @@ jobs:
           path: omnivex/reports/*.html
           retention-days: 30
 
+      - name: Schwab sync (positions, trades, snapshot)
+        if: success() && secrets.SCHWAB_API_KEY != ''
+        working-directory: ./omnivex
+        env:
+          POSTGRES_URL:        ${{ secrets.POSTGRES_URL }}
+          SCHWAB_API_KEY:      ${{ secrets.SCHWAB_API_KEY }}
+          SCHWAB_API_SECRET:   ${{ secrets.SCHWAB_API_SECRET }}
+          SCHWAB_ACCOUNT_HASH: ${{ secrets.SCHWAB_ACCOUNT_HASH }}
+          SCHWAB_TOKEN_PATH:   /tmp/schwab_token.json
+        run: |
+          echo "${{ secrets.SCHWAB_TOKEN_JSON }}" > /tmp/schwab_token.json
+          python -c "
+from dotenv import load_dotenv; load_dotenv()
+from data.schwab_sync import run_full_sync
+run_full_sync()
+"
+        continue-on-error: true
+
       - name: Trigger Vercel redeploy
         if: success()
         run: |
