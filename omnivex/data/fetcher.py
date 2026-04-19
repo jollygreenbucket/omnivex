@@ -98,6 +98,9 @@ def get_ticker_data(ticker: str, period: str = "1y") -> dict:
         result["ebitda"] = info.get("ebitda")
         result["interest_expense"] = info.get("interestExpense")
         result["dividend_yield"] = info.get("dividendYield")
+        result["institutional_pct"] = (
+            info.get("heldPercentInstitutions") or info.get("institutionsPercentHeld")
+        )
         result["short_percent"] = info.get("shortPercentOfFloat")
         result["52w_high"] = info.get("fiftyTwoWeekHigh")
         result["52w_low"] = info.get("fiftyTwoWeekLow")

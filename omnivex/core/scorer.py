@@ -92,6 +92,12 @@ def score_ticker(data: dict, market_ctx: dict, spy_momentum: dict,
         result["flags"].append("FORENSIC")
         adjustment_log.append(f"forensic_flag: {SCORE_ADJUSTMENTS['forensic_red_flag']}")
 
+    retail_crowded = _is_retail_crowded(data)
+    if retail_crowded:
+        adjustments += SCORE_ADJUSTMENTS["retail_crowding"]
+        result["flags"].append("CROWD_OVERLOAD")
+        adjustment_log.append(f"retail_crowding: {SCORE_ADJUSTMENTS['retail_crowding']}")
+
     result["adjustments"] = round(adjustments, 2)
     result["adjustment_log"] = adjustment_log
 
@@ -332,6 +338,10 @@ def calc_psos(data: dict, market_ctx: dict, analyst_events: list) -> dict:
     psos_raw = P * S * O * C
     psos_normalized = round((psos_raw / 10000) * 100, 2)
 
+    scenarios = _generate_psos_scenarios(
+        p_components, s_components, o_components, c_components
+    )
+
     return {
         "psos_raw": round(psos_raw, 2),
         "psos_normalized": psos_normalized,
@@ -343,6 +353,7 @@ def calc_psos(data: dict, market_ctx: dict, analyst_events: list) -> dict:
         "s_components": s_components,
         "o_components": o_components,
         "c_components": c_components,
+        "scenarios": scenarios,
     }
 
 
@@ -450,6 +461,7 @@ def check_smart_core_gates(data: dict) -> bool:
     nde = data.get("net_debt_ebitda")
     ic = data.get("interest_coverage")
     rev_growth = data.get("revenue_growth")
+    roic = data.get("roic")  # returnOnAssets proxy
 
     # Net Debt/EBITDA < 2x
     if nde is not None and nde > SMART_CORE_HARD_GATES["max_net_debt_ebitda"]:
@@ -464,6 +476,10 @@ def check_smart_core_gates(data: dict) -> bool:
         rev_pct = rev_growth * 100 if abs(rev_growth) < 5 else rev_growth
         if rev_pct < SMART_CORE_HARD_GATES["min_revenue_growth_pct"]:
             return False
+
+    # ROIC proxy (ROA) > 8% — maps to ~ROIC > 15% spec threshold
+    if roic is not None and roic < SMART_CORE_HARD_GATES["min_roic_proxy"]:
+        return False
 
     return True
 
@@ -597,3 +613,60 @@ def _scale_to_10(value: float, min_val: float, max_val: float) -> float:
         return 5.0
     scaled = (value - min_val) / (max_val - min_val) * 9 + 1
     return round(max(1, min(10, scaled)), 2)
+
+
+def _is_retail_crowded(data: dict) -> bool:
+    """True when institutional ownership < 50% — retail-dominated name."""
+    inst = data.get("institutional_pct")
+    return inst is not None and inst < 0.50
+
+
+def _generate_psos_scenarios(p_components: dict, s_components: dict,
+                              o_components: dict, c_components: dict) -> dict:
+    """
+    Derive top-2 bull and bear scenarios from PSOS sub-component scores.
+    Scores are on 1–10 scale; >= 7 = meaningful signal, <= 3 = meaningful risk.
+    """
+    BULL_MAP = {
+        ("p", "analyst_direction"):   "Analyst upgrade momentum building",
+        ("p", "earnings_proximity"):  "Earnings catalyst within 30 days",
+        ("p", "volume_confirmation"): "Volume expansion confirming move",
+        ("o", "upside_downside_ratio"): "Price near 52W low — asymmetric upside",
+        ("c", "multiframe_trend"):    "Trend confirmed above both 50/200 DMA",
+        ("c", "breakout_cleanliness"): "RSI breakout — clean technical setup",
+    }
+    BEAR_MAP = {
+        ("s", "short_interest_pct"):  "High short interest — squeeze or bearish thesis",
+        ("s", "atr_percentile"):      "Elevated ATR — high gap/swing risk",
+    }
+    BEAR_LOW_MAP = {
+        # These are bearish when their score is LOW (<=3)
+        ("p", "analyst_direction"):     "Analyst downgrades — negative sentiment shift",
+        ("o", "upside_downside_ratio"): "Price near 52W high — limited upside",
+        ("c", "multiframe_trend"):      "Below both MAs — downtrend active",
+    }
+
+    all_scores = {
+        **{("p", k): v for k, v in p_components.items()},
+        **{("s", k): v for k, v in s_components.items()},
+        **{("o", k): v for k, v in o_components.items()},
+        **{("c", k): v for k, v in c_components.items()},
+    }
+
+    bulls = sorted(
+        [(v, label) for (k, label) in BULL_MAP.items()
+         if (v := all_scores.get(k, 5)) >= 7],
+        reverse=True,
+    )
+    bears = sorted(
+        [(v, label) for (k, label) in BEAR_MAP.items()
+         if (v := all_scores.get(k, 5)) >= 7]
+        + [(10 - v, label) for (k, label) in BEAR_LOW_MAP.items()
+           if (v := all_scores.get(k, 5)) <= 3],
+        reverse=True,
+    )
+
+    return {
+        "bull": [label for _, label in bulls[:2]] or ["No strong upside catalysts detected"],
+        "bear": [label for _, label in bears[:2]] or ["No elevated risk signals detected"],
+    }

@@ -10,6 +10,7 @@ ETF_UNIVERSE = [
     "QQQ", "SPY", "ARKK", "VTV", "SCHD", "IJH",
     "IWM", "XLK", "XLF", "XLY", "MTUM",
     "XLV", "XLE", "XLI", "XLP", "XLU", "XLB",  # sector ETFs for overlay
+    "SMH", "ARKQ", "ARKF",                        # thematic: semis, robotics, fintech
     "VIXY", "SH", "PSQ",                          # anti-fund instruments
     "SGOV", "BIL",                                # cash equivalents
 ]
@@ -226,6 +227,7 @@ SMART_CORE_HARD_GATES = {
     "max_net_debt_ebitda": 2.0,
     "min_interest_coverage": 10.0,
     "min_revenue_growth_pct": 5.0,
+    "min_roic_proxy": 0.08,  # ROA proxy for ROIC > 15% — yfinance returnOnAssets
 }
 
 # ─────────────────────────────────────────────
