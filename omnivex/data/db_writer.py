@@ -22,12 +22,26 @@ except ImportError:
 try:
     import numpy as np
     if HAS_PSYCOPG2:
+        def _float_adapter(v):
+            return AsIs("NULL") if np.isnan(v) else AsIs(float(v))
+
         register_adapter(np.bool_,    lambda v: AsIs(bool(v)))
+        register_adapter(np.int8,     lambda v: AsIs(int(v)))
+        register_adapter(np.int16,    lambda v: AsIs(int(v)))
         register_adapter(np.int32,    lambda v: AsIs(int(v)))
         register_adapter(np.int64,    lambda v: AsIs(int(v)))
-        register_adapter(np.float32,  lambda v: AsIs(float(v)) if not np.isnan(v) else AsIs("NULL"))
-        register_adapter(np.float64,  lambda v: AsIs(float(v)) if not np.isnan(v) else AsIs("NULL"))
-        register_adapter(np.float16,  lambda v: AsIs(float(v)) if not np.isnan(v) else AsIs("NULL"))
+        register_adapter(np.uint8,    lambda v: AsIs(int(v)))
+        register_adapter(np.uint16,   lambda v: AsIs(int(v)))
+        register_adapter(np.uint32,   lambda v: AsIs(int(v)))
+        register_adapter(np.uint64,   lambda v: AsIs(int(v)))
+        register_adapter(np.float16,  _float_adapter)
+        register_adapter(np.float32,  _float_adapter)
+        register_adapter(np.float64,  _float_adapter)
+        # numpy 2.x renamed float128 → longdouble on some platforms
+        for _t in ("float128", "longdouble"):
+            _cls = getattr(np, _t, None)
+            if _cls is not None:
+                register_adapter(_cls, _float_adapter)
 except (ImportError, Exception):
     pass
 
