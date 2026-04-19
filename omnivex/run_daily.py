@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from data.fetcher import (
     get_ticker_data, get_market_context,
     get_finviz_gainers, get_spy_momentum,
+    build_equity_universe,
 )
 from core.scorer import score_ticker
 from core.mode_detector import detect_mode, get_target_allocation
@@ -29,7 +30,7 @@ from output.reporter import (
     print_terminal_report, write_csv, write_html,
     assign_action, calc_suggested_weight,
 )
-from core.config import ETF_UNIVERSE, TODAY, CSV_PATH, HTML_PATH
+from core.config import ETF_UNIVERSE, ETF_SCAN_UNIVERSE, TODAY, CSV_PATH, HTML_PATH
 
 
 # ─────────────────────────────────────────────
@@ -56,9 +57,18 @@ def run(tickers: list = None, portfolio: dict = None, demo: bool = False,
     portfolio: {TICKER: position_pct} — current holdings
     demo: use tiny universe for fast testing
     """
-    universe = tickers or (
-        ["AAPL", "MSFT", "NVDA", "SPY", "QQQ"] if demo else DEFAULT_UNIVERSE
-    )
+    if tickers:
+        universe = tickers
+    elif demo:
+        universe = ["AAPL", "MSFT", "NVDA", "SPY", "QQQ"]
+    else:
+        # Build dynamic universe from ETF holdings + Finviz screens
+        universe = build_equity_universe(
+            scan_etfs=ETF_SCAN_UNIVERSE,
+            top_n_per_etf=20,
+            include_finviz=True,
+            target_size=150,
+        ) or DEFAULT_UNIVERSE  # fallback if ETF extraction fails
     portfolio = portfolio or {}
 
     print(f"\n{'─'*55}")

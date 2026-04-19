@@ -6,13 +6,116 @@ Version: 2.3 | All values sourced directly from knowledge base
 # ─────────────────────────────────────────────
 # UNIVERSE
 # ─────────────────────────────────────────────
+# ─────────────────────────────────────────────
+# ETF UNIVERSE — Institutional-grade, layered
+# ─────────────────────────────────────────────
+# Layers:
+#   SCAN  → pull top holdings to build equity universe
+#   SIGNAL → used as market context / regime indicators only
+#   HEDGE  → Anti-Fund mode instruments
+# ─────────────────────────────────────────────
+
+ETF_LAYERS = {
+    # ── Broad Market (SCAN) ───────────────────
+    "broad_market": {
+        "tickers": ["SPY", "QQQ", "IWM", "IJH", "DIA"],
+        "role": "scan",
+        "rationale": "Core US equity — mega/mid/small cap breadth",
+    },
+
+    # ── All 11 GICS Sectors (SCAN) ────────────
+    "sector": {
+        "tickers": [
+            "XLK",   # Technology
+            "XLF",   # Financials
+            "XLV",   # Health Care
+            "XLY",   # Consumer Discretionary
+            "XLP",   # Consumer Staples
+            "XLE",   # Energy
+            "XLB",   # Materials
+            "XLU",   # Utilities
+            "XLRE",  # Real Estate
+            "XLC",   # Communication Services
+            "XLI",   # Industrials
+        ],
+        "role": "scan",
+        "rationale": "Full GICS sector grid — no sector gap",
+    },
+
+    # ── Factor (SCAN) ─────────────────────────
+    "factor": {
+        "tickers": [
+            "MTUM",  # Momentum
+            "VTV",   # Value
+            "SCHD",  # Dividend quality
+            "QUAL",  # Quality (MSCI)
+            "USMV",  # Low volatility
+            "VUG",   # Growth
+            "SCHG",  # Large-cap growth
+        ],
+        "role": "scan",
+        "rationale": "Factor tilts: momentum / value / quality / growth / low-vol",
+    },
+
+    # ── Thematic (SCAN) ───────────────────────
+    "thematic": {
+        "tickers": [
+            "ARKK",  # Disruptive innovation
+            "ARKQ",  # Robotics / AI
+            "ARKF",  # Fintech
+            "SMH",   # Semiconductors
+            "BOTZ",  # Robotics & AI
+            "QTUM",  # Quantum computing
+            "ICLN",  # Clean energy
+            "XBI",   # Biotech
+            "IBB",   # Biotech broad
+            "HACK",  # Cybersecurity
+        ],
+        "role": "scan",
+        "rationale": "Thematic: AI, semis, biotech, fintech, clean energy, quantum, cyber",
+    },
+
+    # ── International (SIGNAL only) ───────────
+    "international": {
+        "tickers": ["VEA", "EFA", "VWO", "EEM"],
+        "role": "signal",
+        "rationale": "Global risk appetite — developed + emerging regime signal",
+    },
+
+    # ── Macro / Fixed Income (SIGNAL only) ────
+    "macro": {
+        "tickers": [
+            "TLT",   # 20Y Treasury — risk-off signal
+            "SHY",   # 1–3Y Treasury — short-end rates
+            "HYG",   # High-yield credit spread
+            "LQD",   # Investment-grade credit
+            "GLD",   # Gold — inflation / crisis hedge
+        ],
+        "role": "signal",
+        "rationale": "Macro regime: rates, credit spreads, inflation hedge",
+    },
+
+    # ── Hedge / Inverse (Anti-Fund mode) ──────
+    "hedge": {
+        "tickers": ["SH", "PSQ", "VIXY", "SGOV", "BIL"],
+        "role": "hedge",
+        "rationale": "Anti-Fund instruments + cash equivalents",
+    },
+}
+
+# Flat lists derived from ETF_LAYERS — used by legacy code
 ETF_UNIVERSE = [
-    "QQQ", "SPY", "ARKK", "VTV", "SCHD", "IJH",
-    "IWM", "XLK", "XLF", "XLY", "MTUM",
-    "XLV", "XLE", "XLI", "XLP", "XLU", "XLB",  # sector ETFs for overlay
-    "SMH", "ARKQ", "ARKF",                        # thematic: semis, robotics, fintech
-    "VIXY", "SH", "PSQ",                          # anti-fund instruments
-    "SGOV", "BIL",                                # cash equivalents
+    t for layer in ETF_LAYERS.values() for t in layer["tickers"]
+]
+ETF_SCAN_UNIVERSE = [
+    t for layer in ETF_LAYERS.values()
+    if layer["role"] == "scan"
+    for t in layer["tickers"]
+]
+ETF_SIGNAL_UNIVERSE = [
+    t for layer in ETF_LAYERS.values()
+    if layer["role"] == "signal"
+    for t in layer["tickers"]
 ]
 
 SECTOR_ETFS = {

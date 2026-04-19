@@ -224,6 +224,80 @@ def get_market_context() -> dict:
     return ctx
 
 
+def get_etf_holdings(etf_ticker: str, top_n: int = 20) -> list:
+    """
+    Pull top N equity holdings from an ETF via yfinance funds_data.
+    Returns list of ticker strings. Falls back gracefully on failure.
+    """
+    try:
+        t = yf.Ticker(etf_ticker)
+        # yfinance >= 0.2.28 exposes funds_data.top_holdings
+        holdings_df = t.funds_data.top_holdings
+        if holdings_df is not None and not holdings_df.empty:
+            tickers = holdings_df.index.tolist()[:top_n]
+            # Filter out non-equity symbols (bonds, cash, etc.)
+            tickers = [
+                tk for tk in tickers
+                if isinstance(tk, str) and tk.replace("-", "").isalpha() and len(tk) <= 5
+            ]
+            return tickers
+    except Exception:
+        pass
+    return []
+
+
+def build_equity_universe(
+    scan_etfs: list = None,
+    top_n_per_etf: int = 20,
+    include_finviz: bool = True,
+    min_market_cap: int = 2_000_000_000,
+    target_size: int = 150,
+) -> list:
+    """
+    Build a dynamic equity universe from ETF holdings + Finviz screens.
+
+    Process:
+      1. Pull top N holdings from each scan ETF
+      2. Merge and deduplicate
+      3. Add Finviz top gainers and high-volume leaders
+      4. Remove the ETF tickers themselves
+      5. Cap at target_size (sorted by appearance frequency = conviction)
+
+    Returns deduplicated list of equity tickers.
+    """
+    from core.config import ETF_SCAN_UNIVERSE
+
+    etfs = scan_etfs or ETF_SCAN_UNIVERSE
+    ticker_counts: dict[str, int] = {}
+
+    print(f"  [Universe] Extracting holdings from {len(etfs)} ETFs...")
+    for etf in etfs:
+        holdings = get_etf_holdings(etf, top_n=top_n_per_etf)
+        for tk in holdings:
+            ticker_counts[tk] = ticker_counts.get(tk, 0) + 1
+        time.sleep(0.2)
+
+    if include_finviz:
+        gainers = get_finviz_gainers(top_n=30)
+        for tk in gainers:
+            ticker_counts[tk] = ticker_counts.get(tk, 0) + 1
+
+    # Remove ETF tickers from equity universe
+    all_etf_tickers = set(etfs)
+    # Sort by conviction (frequency across ETFs) — most cross-listed = highest conviction
+    ranked = sorted(
+        [(tk, cnt) for tk, cnt in ticker_counts.items() if tk not in all_etf_tickers],
+        key=lambda x: x[1],
+        reverse=True,
+    )
+
+    universe = [tk for tk, _ in ranked[:target_size]]
+    print(f"  [Universe] Built: {len(universe)} tickers "
+          f"(from {sum(ticker_counts.values())} raw holdings, "
+          f"{len(set(ticker_counts))} unique)")
+    return universe
+
+
 def get_finviz_gainers(top_n: int = 20) -> list:
     """
     Scrape Finviz top gainers.
