@@ -10,17 +10,31 @@ import os
 import json
 from datetime import date
 
+try:
+    import psycopg2
+    from psycopg2.extras import execute_values
+    from psycopg2.extensions import register_adapter, AsIs
+    HAS_PSYCOPG2 = True
+except ImportError:
+    HAS_PSYCOPG2 = False
+
+# Register numpy type adapters so psycopg2 handles all numpy scalars natively
+try:
+    import numpy as np
+    if HAS_PSYCOPG2:
+        register_adapter(np.bool_,    lambda v: AsIs(bool(v)))
+        register_adapter(np.int32,    lambda v: AsIs(int(v)))
+        register_adapter(np.int64,    lambda v: AsIs(int(v)))
+        register_adapter(np.float32,  lambda v: AsIs(float(v)) if not np.isnan(v) else AsIs("NULL"))
+        register_adapter(np.float64,  lambda v: AsIs(float(v)) if not np.isnan(v) else AsIs("NULL"))
+        register_adapter(np.float16,  lambda v: AsIs(float(v)) if not np.isnan(v) else AsIs("NULL"))
+except (ImportError, Exception):
+    pass
+
 
 def _to_bool(val):
     """Convert numpy.bool_ (and friends) to Python bool; preserve None."""
     return bool(val) if val is not None else None
-
-try:
-    import psycopg2
-    from psycopg2.extras import execute_values
-    HAS_PSYCOPG2 = True
-except ImportError:
-    HAS_PSYCOPG2 = False
 
 
 def get_connection():
