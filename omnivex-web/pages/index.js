@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import Head from 'next/head'
 import {
   AreaChart, Area, LineChart, Line, BarChart, Bar,
@@ -112,6 +112,7 @@ function SectionLabel({ children }) {
 // ─── Main App ──────────────────────────────────────────────────────────────
 
 export default function Omnivex() {
+  const [mounted, setMounted] = useState(false)
   const [tab, setTab] = useState('signals')
   const [dashData, setDashData] = useState(null)
   const [portData, setPortData] = useState(null)
@@ -122,6 +123,8 @@ export default function Omnivex() {
   const [sortCol, setSortCol] = useState('omnivex_score')
   const [focusTicker, setFocusTicker] = useState(null)
   const [tickerHist, setTickerHist] = useState(null)
+
+  useEffect(() => setMounted(true), [])
 
   // Fetch dashboard data
   useEffect(() => {
@@ -448,7 +451,7 @@ export default function Omnivex() {
             </div>
 
             {/* Score distribution */}
-            {distribution?.length > 0 && (
+            {mounted && distribution?.length > 0 && (
               <div className="card anim-3" style={{ marginBottom: 28 }}>
                 <div className="label" style={{ marginBottom: 16 }}>Score Distribution</div>
                 <ResponsiveContainer width="100%" height={72}>
@@ -604,7 +607,7 @@ export default function Omnivex() {
                 </div>
 
                 {/* Performance vs SPY */}
-                {perfChart.length > 0 && (
+                {mounted && perfChart.length > 0 && (
                   <div className="card" style={{ marginBottom: 20 }}>
                     <div className="label" style={{ marginBottom: 16 }}>
                       Performance vs SPY — Cumulative %
@@ -814,7 +817,7 @@ export default function Omnivex() {
               <div className="label" style={{ marginBottom: 16 }}>
                 Market Context — 90 Days
               </div>
-              <ResponsiveContainer width="100%" height={180}>
+              {mounted && <ResponsiveContainer width="100%" height={180}>
                 <AreaChart data={modeHistory}>
                   <defs>
                     <linearGradient id="vixG" x1="0" y1="0" x2="0" y2="1">
@@ -835,7 +838,7 @@ export default function Omnivex() {
                   <Line type="monotone" dataKey="ad_ratio" name="A/D"
                     stroke="#6eb3f7" strokeWidth={1} dot={false} strokeDasharray="3 3" />
                 </AreaChart>
-              </ResponsiveContainer>
+              </ResponsiveContainer>}
             </div>
 
             {/* Movers */}
@@ -941,7 +944,7 @@ export default function Omnivex() {
           ) : (
             <>
               {/* Score chart */}
-              {tickerHist.history?.length > 1 && (
+              {mounted && tickerHist.history?.length > 1 && (
                 <div style={{ marginBottom: 20 }}>
                   <div className="label" style={{ marginBottom: 10 }}>Score History</div>
                   <ResponsiveContainer width="100%" height={110}>
