@@ -28,9 +28,7 @@ jobs:
           cache: 'pip'
 
       - name: Install dependencies
-        run: |
-          pip install yfinance pandas requests beautifulsoup4 \
-                      jinja2 colorama psycopg2-binary python-dotenv
+        run: pip install -r omnivex/requirements.txt
 
       - name: Run Omnivex scorer
         working-directory: ./omnivex
