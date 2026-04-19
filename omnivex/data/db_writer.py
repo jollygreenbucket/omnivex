@@ -10,6 +10,11 @@ import os
 import json
 from datetime import date
 
+
+def _to_bool(val):
+    """Convert numpy.bool_ (and friends) to Python bool; preserve None."""
+    return bool(val) if val is not None else None
+
 try:
     import psycopg2
     from psycopg2.extras import execute_values
@@ -72,12 +77,12 @@ def write_run(mode_result: dict, scored: list, run_date: str = None) -> bool:
         """, (
             today,
             mode_result.get("mode", "CORE"),
-            mode_result.get("chop_guard_active", False),
+            _to_bool(mode_result.get("chop_guard_active", False)),
             mode_result.get("vix"),
             mode_result.get("ad_ratio"),
             mode_result.get("spy_daily_pct"),
-            mode_result.get("spy_above_50dma"),
-            mode_result.get("spy_above_200dma"),
+            _to_bool(mode_result.get("spy_above_50dma")),
+            _to_bool(mode_result.get("spy_above_200dma")),
             mode_result.get("yield_curve_state", "UNKNOWN"),
             mode_result.get("alpha_trigger_count", 0),
             mode_result.get("hedge_trigger_count", 0),

@@ -8,6 +8,8 @@ Usage:
   python run_daily.py --tickers AAPL MSFT NVDA
   python run_daily.py --demo   (uses small test universe, no live data)
 """
+from dotenv import load_dotenv
+load_dotenv()
 
 import sys
 import os
@@ -150,6 +152,10 @@ def run(tickers: list = None, portfolio: dict = None, demo: bool = False,
     # HTML
     html_path = write_html(mode_result, scored)
     print(f"  HTML: {html_path}")
+
+    # DB — add these lines
+    from data.db_writer import write_run
+    write_run(mode_result, scored)
 
     # Summary
     buys = [s for s in scored if s.get("action") in ("BUY", "ADD")]
