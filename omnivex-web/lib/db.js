@@ -1,14 +1,16 @@
-import { sql } from '@vercel/postgres'
+import { neon } from '@neondatabase/serverless'
+
+const sql = neon(process.env.POSTGRES_URL)
 
 // ─── Run & Scores ──────────────────────────────────────────────────────────
 
 export async function getLatestRun() {
-  const { rows } = await sql`SELECT * FROM runs ORDER BY run_date DESC LIMIT 1`
+  const rows = await sql`SELECT * FROM runs ORDER BY run_date DESC LIMIT 1`
   return rows[0] || null
 }
 
 export async function getLatestScores() {
-  const { rows } = await sql`
+  const rows = await sql`
     SELECT s.* FROM scores s
     INNER JOIN (SELECT MAX(run_date) as max_date FROM runs) r
     ON s.run_date = r.max_date
@@ -18,7 +20,7 @@ export async function getLatestScores() {
 }
 
 export async function getModeHistory(days = 90) {
-  const { rows } = await sql`
+  const rows = await sql`
     SELECT * FROM mode_history
     WHERE run_date >= CURRENT_DATE - ${days}::integer
     ORDER BY run_date ASC
@@ -27,7 +29,7 @@ export async function getModeHistory(days = 90) {
 }
 
 export async function getRunHistory(days = 90) {
-  const { rows } = await sql`
+  const rows = await sql`
     SELECT * FROM runs
     WHERE run_date >= CURRENT_DATE - ${days}::integer
     ORDER BY run_date DESC
@@ -36,7 +38,7 @@ export async function getRunHistory(days = 90) {
 }
 
 export async function getTickerHistory(ticker, days = 60) {
-  const { rows } = await sql`
+  const rows = await sql`
     SELECT s.run_date, s.omnivex_score, s.qtech, s.psos, s.signal_conf,
            s.action, s.tier, s.flags, r.mode
     FROM scores s JOIN runs r ON s.run_date = r.run_date
@@ -48,7 +50,7 @@ export async function getTickerHistory(ticker, days = 60) {
 }
 
 export async function getTopMovers(limit = 10) {
-  const { rows } = await sql`
+  const rows = await sql`
     WITH latest AS (
       SELECT ticker, omnivex_score, action, tier
       FROM scores WHERE run_date = (SELECT MAX(run_date) FROM runs)
@@ -69,7 +71,7 @@ export async function getTopMovers(limit = 10) {
 }
 
 export async function getScoreDistribution() {
-  const { rows } = await sql`
+  const rows = await sql`
     SELECT
       CASE
         WHEN omnivex_score >= 80 THEN 'Breakout'
@@ -88,7 +90,7 @@ export async function getScoreDistribution() {
 // ─── Portfolio ─────────────────────────────────────────────────────────────
 
 export async function getHoldings() {
-  const { rows } = await sql`
+  const rows = await sql`
     SELECT h.*, s.omnivex_score, s.action, s.qtech, s.psos, s.signal_conf
     FROM holdings h
     LEFT JOIN scores s ON s.ticker = h.ticker
@@ -99,14 +101,14 @@ export async function getHoldings() {
 }
 
 export async function getTrades(limit = 100) {
-  const { rows } = await sql`
+  const rows = await sql`
     SELECT * FROM trades ORDER BY trade_date DESC, created_at DESC LIMIT ${limit}
   `
   return rows
 }
 
 export async function getPortfolioSnapshots(days = 90) {
-  const { rows } = await sql`
+  const rows = await sql`
     SELECT * FROM portfolio_snapshots
     WHERE snapshot_date >= CURRENT_DATE - ${days}::integer
     ORDER BY snapshot_date ASC
@@ -115,7 +117,7 @@ export async function getPortfolioSnapshots(days = 90) {
 }
 
 export async function getTierPerformance(days = 90) {
-  const { rows } = await sql`
+  const rows = await sql`
     SELECT * FROM tier_performance
     WHERE snapshot_date >= CURRENT_DATE - ${days}::integer
     ORDER BY snapshot_date ASC
@@ -124,14 +126,14 @@ export async function getTierPerformance(days = 90) {
 }
 
 export async function getLatestSnapshot() {
-  const { rows } = await sql`
+  const rows = await sql`
     SELECT * FROM portfolio_snapshots ORDER BY snapshot_date DESC LIMIT 1
   `
   return rows[0] || null
 }
 
 export async function getAllocationSummary() {
-  const { rows } = await sql`
+  const rows = await sql`
     SELECT
       COALESCE(h.tier, 'UNASSIGNED') as tier,
       COUNT(*) as positions,
@@ -147,7 +149,7 @@ export async function getAllocationSummary() {
 }
 
 export async function getPerformanceVsSpy(days = 90) {
-  const { rows } = await sql`
+  const rows = await sql`
     SELECT snapshot_date, total_pnl_pct, spy_daily_pct, mode,
            smart_core_pct, tactical_pct, speculative_pct, cash_pct
     FROM portfolio_snapshots

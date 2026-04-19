@@ -10,10 +10,10 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "next": "14.2.3",
-    "react": "^18",
-    "react-dom": "^18",
-    "@vercel/postgres": "^0.8.0",
+    "next": "15.3.1",
+    "react": "^19",
+    "react-dom": "^19",
+    "@neondatabase/serverless": "^0.10.4",
     "recharts": "^2.12.4",
     "date-fns": "^3.6.0"
   },
