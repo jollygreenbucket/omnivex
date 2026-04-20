@@ -156,8 +156,23 @@ export default function Omnivex() {
         const ma = actionF === 'ALL' || s.action === actionF
         return ms && mt && ma
       })
-      .sort((a, b) => (b[sortCol] || 0) - (a[sortCol] || 0))
+      .sort((a, b) => ((b[sortCol] ?? 0) - (a[sortCol] ?? 0)))
   }, [dashData, search, tierF, actionF, sortCol])
+
+  const perfChart = useMemo(() => {
+    if (!perfVsSpy?.length) return []
+    let cumPort = 0, cumSpy = 0
+    return perfVsSpy.map(d => {
+      cumPort += (d.total_pnl_pct || 0) * 100
+      cumSpy += (d.spy_daily_pct || 0) * 100
+      return {
+        date: d.snapshot_date,
+        portfolio: +cumPort.toFixed(2),
+        spy: +cumSpy.toFixed(2),
+        mode: d.mode,
+      }
+    })
+  }, [portData])
 
   // ── Loading ──
   if (loading) return (
@@ -210,21 +225,6 @@ export default function Omnivex() {
   const totalPnl = holdings.reduce((s, h) => s + (h.unrealized_pnl || 0), 0)
   const totalCost = totalValue - totalPnl
   const totalPnlPct = totalCost > 0 ? (totalPnl / totalCost) * 100 : 0
-
-  // Cumulative performance chart
-  const perfChart = useMemo(() => {
-    let cumPort = 0, cumSpy = 0
-    return perfVsSpy.map(d => {
-      cumPort += (d.total_pnl_pct || 0) * 100
-      cumSpy += (d.spy_daily_pct || 0) * 100
-      return {
-        date: d.snapshot_date,
-        portfolio: +cumPort.toFixed(2),
-        spy: +cumSpy.toFixed(2),
-        mode: d.mode,
-      }
-    })
-  }, [perfVsSpy])
 
   // Target allocation by mode
   const targetAlloc = {
