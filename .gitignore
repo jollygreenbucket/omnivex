@@ -26,7 +26,8 @@ ENV/
 # Logs and outputs (generated at runtime)
 omnivex/logs/
 omnivex/reports/
-omnivex/output/
+omnivex/output/*.csv
+omnivex/output/*.html
 
 # ─── Node / Next.js (omnivex-web/) ───────────────────────────────────────────
 node_modules/
