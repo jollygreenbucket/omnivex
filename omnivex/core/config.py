@@ -134,8 +134,8 @@ SECTOR_ETFS = {
 # OMNIVEX SCORE WEIGHTS
 # ─────────────────────────────────────────────
 OMNIVEX_WEIGHTS = {
-    "qtech": 0.40,
-    "psos": 0.30,
+    "qtech": 0.55,
+    "psos": 0.15,
     "signal_confidence": 0.30,
 }
 

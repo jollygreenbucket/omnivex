@@ -32,6 +32,17 @@ from output.reporter import (
 )
 from core.config import ETF_UNIVERSE, ETF_SCAN_UNIVERSE, TODAY, CSV_PATH, HTML_PATH
 
+from data.finnhub import get_finnhub_data
+
+# Inside the scoring loop, replace:
+result = score_ticker(data=data, market_ctx=market_ctx, spy_momentum=spy_momentum,
+    analyst_events=[], insider_events=[])
+
+# With:
+fh = get_finnhub_data(ticker)
+data["post_earnings_move_score"] = fh["earnings_surprise_score"]
+result = score_ticker(data=data, market_ctx=market_ctx, spy_momentum=spy_momentum,
+    analyst_events=fh["analyst_events"], insider_events=fh["insider_events"])
 
 # ─────────────────────────────────────────────
 # DEFAULT UNIVERSE
