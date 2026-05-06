@@ -7,6 +7,7 @@ Layer 3: HTML Dashboard Report
 
 import csv
 import os
+import shutil
 from datetime import datetime
 from core.config import (
     TODAY, CSV_PATH, HTML_PATH, LOG_DIR, REPORT_DIR,
@@ -189,7 +190,7 @@ def write_csv(mode_result: dict, scored: list, path: str = None):
                 "Override_Reason": s.get("override_reason", ""),
                 "Forensic_Flag": bool(s.get("forensic_flags")),
                 "Forensic_Detail": "|".join(s.get("forensic_flags", [])),
-                "Earnings_Proximity_Days": s.get("psos_detail", {}).get("p_components", {}).get("earnings_proximity", ""),
+                "Earnings_Proximity_Days": s.get("earnings_proximity_days", ""),
                 "Data_Quality": s.get("data_quality", ""),
                 "VIX": vix,
                 "AD_Ratio": ad,
@@ -221,8 +222,9 @@ def write_csv(mode_result: dict, scored: list, path: str = None):
 # ─────────────────────────────────────────────
 
 def write_html(mode_result: dict, scored: list, path: str = None):
-    """Generate full HTML dashboard report."""
+    """Generate full HTML dashboard report and refresh reports/latest.html."""
     path = path or HTML_PATH
+    latest_path = os.path.join(REPORT_DIR, "latest.html")
 
     mode = mode_result["mode"]
     mode_colors = {"ALPHA": "#22c55e", "HEDGE": "#ef4444", "CORE": "#f59e0b"}
@@ -442,6 +444,8 @@ def write_html(mode_result: dict, scored: list, path: str = None):
     with open(path, "w", encoding="utf-8") as f:
         f.write(html)
 
+    shutil.copyfile(path, latest_path)
+
     return path
 
 
@@ -493,7 +497,12 @@ def calc_suggested_weight(s: dict, mode: str = "CORE") -> float:
     tier = s.get("tier", "MONITOR")
     score = s.get("omnivex_score", 0)
 
-    sizing = POSITION_SIZING.get(tier.upper(), None)
+    tier_key_map = {
+        "SMART_CORE": "smart_core",
+        "TACTICAL": "tactical",
+        "SPECULATIVE": "speculative",
+    }
+    sizing = POSITION_SIZING.get(tier_key_map.get(tier), None)
     if not sizing:
         return 0.0
 
@@ -504,7 +513,7 @@ def calc_suggested_weight(s: dict, mode: str = "CORE") -> float:
     bonus = 0.0
     if score >= sizing["score_bonus_threshold"]:
         bonus += 0.01
-    if "ceo_insider_buy" in s.get("adjustment_log", []):
+    if any(log.startswith("ceo_insider_buy:") for log in s.get("adjustment_log", [])):
         bonus += 0.01
 
     weight = min(base + bonus, max_weight) * 100  # as percentage

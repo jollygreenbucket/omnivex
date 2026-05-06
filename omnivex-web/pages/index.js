@@ -163,6 +163,9 @@ export default function Omnivex() {
   const [tab, setTab] = useState('signals')
   const [dashData, setDashData] = useState(null)
   const [portData, setPortData] = useState(null)
+  const [runStatus, setRunStatus] = useState(null)
+  const [triggeringRun, setTriggeringRun] = useState(false)
+  const [runError, setRunError] = useState(null)
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [tierF, setTierF] = useState('ALL')
@@ -173,11 +176,26 @@ export default function Omnivex() {
 
   useEffect(() => setMounted(true), [])
 
-  useEffect(() => {
-    Promise.all([
+  async function loadDashboardData() {
+    const [d, p] = await Promise.all([
       fetch('/api/dashboard').then(r => r.json()),
       fetch('/api/portfolio').then(r => r.json()).catch(() => null),
-    ]).then(([d, p]) => { setDashData(d); setPortData(p); setLoading(false) })
+    ])
+    setDashData(d)
+    setPortData(p)
+  }
+
+  async function loadRunStatus() {
+    const response = await fetch('/api/run-status')
+    const data = await response.json()
+    setRunStatus(data.run || null)
+  }
+
+  useEffect(() => {
+    Promise.all([
+      loadDashboardData(),
+      loadRunStatus().catch(() => null),
+    ]).finally(() => setLoading(false))
   }, [])
 
   useEffect(() => {
@@ -185,6 +203,50 @@ export default function Omnivex() {
     setTickerHist(null)
     fetch(`/api/ticker?ticker=${focusTicker}`).then(r => r.json()).then(setTickerHist)
   }, [focusTicker])
+
+  useEffect(() => {
+    if (!runStatus || !['queued', 'in_progress'].includes(runStatus.status)) return
+
+    const poll = setInterval(async () => {
+      try {
+        const response = await fetch('/api/run-status')
+        const data = await response.json()
+        const nextRun = data.run || null
+        const previousStatus = runStatus.status
+        setRunStatus(nextRun)
+
+        if (nextRun && !['queued', 'in_progress'].includes(nextRun.status)) {
+          if (nextRun.conclusion === 'success') {
+            await loadDashboardData()
+          }
+          if (previousStatus === 'queued' || previousStatus === 'in_progress') {
+            setTriggeringRun(false)
+          }
+        }
+      } catch {}
+    }, 10000)
+
+    return () => clearInterval(poll)
+  }, [runStatus])
+
+  async function handleRunDaily() {
+    setTriggeringRun(true)
+    setRunError(null)
+
+    try {
+      const response = await fetch('/api/run-daily', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ demo: false }),
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'Failed to trigger workflow')
+      setRunStatus(data.run || { status: 'queued', conclusion: null })
+    } catch (err) {
+      setRunError(err.message)
+      setTriggeringRun(false)
+    }
+  }
 
   const scores = useMemo(() => {
     if (!dashData?.scores) return []
@@ -250,6 +312,22 @@ export default function Omnivex() {
   const actualAlloc = {}
   allocation.forEach(a => { actualAlloc[a.tier] = totalValue > 0 ? +((a.total_value / totalValue) * 100).toFixed(1) : 0 })
 
+  const workflowRunning = ['queued', 'in_progress'].includes(runStatus?.status)
+  const workflowSucceeded = runStatus?.status === 'completed' && runStatus?.conclusion === 'success'
+  const workflowFailed = runStatus?.status === 'completed' && runStatus?.conclusion && runStatus?.conclusion !== 'success'
+  const runButtonDisabled = triggeringRun || workflowRunning
+  const runButtonLabel = workflowRunning ? 'Run In Progress' : triggeringRun ? 'Starting Run...' : 'Run Daily'
+  const runStatusLabel =
+    workflowRunning ? `${runStatus.status === 'queued' ? 'Queued' : 'Running'} · #${runStatus?.runNumber || '—'}` :
+    workflowSucceeded ? `Last run succeeded · #${runStatus?.runNumber || '—'}` :
+    workflowFailed ? `Last run ${runStatus?.conclusion}` :
+    'Ready'
+  const runStatusColor =
+    workflowRunning ? '#e0a832' :
+    workflowSucceeded ? '#2de0aa' :
+    workflowFailed ? '#f05555' :
+    '#6a7290'
+
   return (
     <>
       <Head>
@@ -274,6 +352,29 @@ export default function Omnivex() {
           ))}
         </nav>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+            <button
+              onClick={handleRunDaily}
+              disabled={runButtonDisabled}
+              style={{
+                background: runButtonDisabled ? '#232840' : accent,
+                color: runButtonDisabled ? '#9aa3c7' : '#071018',
+                border: 'none',
+                borderRadius: 6,
+                padding: '8px 14px',
+                fontFamily: 'var(--font-mono)',
+                fontSize: 12,
+                fontWeight: 700,
+                letterSpacing: '.04em',
+                cursor: runButtonDisabled ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {runButtonLabel}
+            </button>
+            <span style={{ fontSize: 10, color: runStatusColor, fontFamily: 'var(--font-mono)' }}>
+              {runStatusLabel}
+            </span>
+          </div>
           <span className={`badge ${modeCls(mode)}`}>{modeLabel(mode)}</span>
           {run?.chop_guard && <span className="badge badge-gold">Chop Guard</span>}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -284,6 +385,12 @@ export default function Omnivex() {
       </header>
 
       <main style={{ padding: '32px 40px', maxWidth: 1500, margin: '0 auto', position: 'relative', zIndex: 1 }}>
+        {runError && (
+          <div className="card" style={{ marginBottom: 16, borderTop: '3px solid var(--hedge)', color: 'var(--silver)' }}>
+            <div className="label" style={{ color: 'var(--hedge)', marginBottom: 8 }}>Workflow Trigger Error</div>
+            <div style={{ fontSize: 13 }}>{runError}</div>
+          </div>
+        )}
 
         {/* ══ SIGNALS TAB ══ */}
         {tab === 'signals' && (

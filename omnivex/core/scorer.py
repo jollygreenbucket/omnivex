@@ -111,6 +111,10 @@ def score_ticker(data: dict, market_ctx: dict, spy_momentum: dict,
         result["override_reason"] = manual_override_reason or "No reason provided"
         result["flags"].append("OVERRIDE")
 
+    # ── Smart Core Gate Check ──
+    result["passes_smart_core_gates"] = check_smart_core_gates(data)
+    result["earnings_proximity_days"] = data.get("earnings_proximity_days")
+
     # ── Final Score ──
     final_score = round(max(0, min(100, adjusted_score)), 2)
     result["omnivex_score"] = final_score
@@ -118,9 +122,6 @@ def score_ticker(data: dict, market_ctx: dict, spy_momentum: dict,
 
     # ── Tier Classification ──
     result["tier"] = classify_tier(result, data)
-
-    # ── Smart Core Gate Check ──
-    result["passes_smart_core_gates"] = check_smart_core_gates(data)
 
     # ── Additional Flags ──
     if data.get("signal_confidence") and result["signal_confidence"] < 40:
@@ -296,7 +297,8 @@ def calc_psos(data: dict, market_ctx: dict, analyst_events: list) -> dict:
     atr_pct = (atr / price) * 100
     s_components["atr_percentile"] = min(10, max(1, int(atr_pct * 2)))
 
-    s_components["post_earnings_move"] = 5  # neutral default without historical data
+    earnings_score = data.get("post_earnings_move_score", 50)
+    s_components["post_earnings_move"] = max(1, min(10, earnings_score / 10))
     short_pct = data.get("short_percent", 0.05) or 0.05
     s_components["short_interest_pct"] = min(10, max(1, int(short_pct * 50)))
     s_components["gap_frequency"] = 5  # neutral default
@@ -334,9 +336,11 @@ def calc_psos(data: dict, market_ctx: dict, analyst_events: list) -> dict:
 
     C = _weighted_component(c_components, PSOS_CLARITY_WEIGHTS)
 
-    # ── Final PSOS ──
-    psos_raw = P * S * O * C
-    psos_normalized = round((psos_raw / 10000) * 100, 2)
+    # ── Final PSOS — weighted average (0-100 scale) ──
+    psos_normalized = round(
+        0.30 * (P * 10) + 0.25 * (S * 10) + 0.25 * (O * 10) + 0.20 * (C * 10), 2
+    )
+    psos_raw = psos_normalized * 100  # keep psos_raw scaled for Speculative gate
 
     scenarios = _generate_psos_scenarios(
         p_components, s_components, o_components, c_components

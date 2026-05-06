@@ -69,6 +69,7 @@ def sync_positions(tier_map: dict = None) -> int:
             p["market_value"],
             p["unrealized_pnl"],
             p["unrealized_pnl_pct"],
+            tier,
         ))
 
     conn.commit()

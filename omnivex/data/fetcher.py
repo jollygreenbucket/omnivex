@@ -184,16 +184,16 @@ def get_market_context() -> dict:
         else:
             ctx["arkk_daily_pct"] = None
 
-        # Yield curve proxy (2Y vs 10Y)
+        # Yield curve proxy (short-end bill rate vs 10Y)
         try:
             tnx = yf.Ticker("^TNX").history(period="5d")  # 10Y
-            irx = yf.Ticker("^IRX").history(period="5d")  # 13-week ~ proxy for short end
+            irx = yf.Ticker("^IRX").history(period="5d")  # 13-week T-bill proxy for short end
             if not tnx.empty and not irx.empty:
                 rate_10y = tnx["Close"].iloc[-1]
-                rate_2y = irx["Close"].iloc[-1] / 100 * 4  # rough annualized proxy
+                short_end_proxy = irx["Close"].iloc[-1] / 100 * 4  # rough annualized proxy
                 ctx["yield_10y"] = round(rate_10y / 100, 4)
-                ctx["yield_2y_proxy"] = round(rate_2y, 4)
-                ctx["yield_curve_inverted"] = rate_2y > (rate_10y / 100)
+                ctx["yield_short_end_proxy"] = round(short_end_proxy, 4)
+                ctx["yield_curve_inverted"] = short_end_proxy > (rate_10y / 100)
                 ctx["yield_curve_state"] = "INVERTED" if ctx["yield_curve_inverted"] else "NORMAL"
             else:
                 ctx["yield_curve_state"] = "UNKNOWN"

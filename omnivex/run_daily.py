@@ -15,6 +15,7 @@ import sys
 import os
 import argparse
 import time
+import webbrowser
 
 # Allow imports from project root
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -24,6 +25,7 @@ from data.fetcher import (
     get_finviz_gainers, get_spy_momentum,
     build_equity_universe,
 )
+from data.finnhub import get_finnhub_data
 from core.scorer import score_ticker
 from core.mode_detector import detect_mode, get_target_allocation
 from output.reporter import (
@@ -31,18 +33,6 @@ from output.reporter import (
     assign_action, calc_suggested_weight,
 )
 from core.config import ETF_UNIVERSE, ETF_SCAN_UNIVERSE, TODAY, CSV_PATH, HTML_PATH
-
-from data.finnhub import get_finnhub_data
-
-# Inside the scoring loop, replace:
-result = score_ticker(data=data, market_ctx=market_ctx, spy_momentum=spy_momentum,
-    analyst_events=[], insider_events=[])
-
-# With:
-fh = get_finnhub_data(ticker)
-data["post_earnings_move_score"] = fh["earnings_surprise_score"]
-result = score_ticker(data=data, market_ctx=market_ctx, spy_momentum=spy_momentum,
-    analyst_events=fh["analyst_events"], insider_events=fh["insider_events"])
 
 # ─────────────────────────────────────────────
 # DEFAULT UNIVERSE
@@ -61,7 +51,7 @@ DEFAULT_UNIVERSE = [
 
 
 def run(tickers: list = None, portfolio: dict = None, demo: bool = False,
-        verbose: bool = False):
+        verbose: bool = False, open_dashboard: bool = True):
     """
     Full daily run.
     tickers: override default universe
@@ -78,7 +68,7 @@ def run(tickers: list = None, portfolio: dict = None, demo: bool = False,
             scan_etfs=ETF_SCAN_UNIVERSE,
             top_n_per_etf=20,
             include_finviz=True,
-            target_size=150,
+            target_size=300,
         ) or DEFAULT_UNIVERSE  # fallback if ETF extraction fails
     portfolio = portfolio or {}
 
@@ -119,25 +109,30 @@ def run(tickers: list = None, portfolio: dict = None, demo: bool = False,
                     print(f"\n  [SKIP] {ticker}: {data.get('error')}")
                 continue
 
-            result = score_ticker(
-                data=data,
-                market_ctx=market_ctx,
-                spy_momentum=spy_momentum,
-                analyst_events=[],   # extend here with real analyst feed
-                insider_events=[],   # extend here with real insider feed
-            )
+            fh = get_finnhub_data(ticker)
+            data["post_earnings_move_score"] = fh["earnings_surprise_score"]
+            # Override yfinance values with better Finnhub equivalents where available
+            fh_fin = fh.get("financials", {})
+            if fh_fin.get("fh_roic") is not None:
+                data["roic"] = fh_fin["fh_roic"] / 100  # normalize to decimal
+            if fh_fin.get("fh_interest_coverage") is not None:
+                data["interest_coverage"] = fh_fin["fh_interest_coverage"]
+            if fh_fin.get("fh_peg") is not None:
+                data["peg_ratio"] = fh_fin["fh_peg"]
+            if fh_fin.get("fh_revenue_growth") is not None:
+                data["revenue_growth"] = fh_fin["fh_revenue_growth"] / 100
+            if fh_fin.get("fh_rel_strength_13w") is not None:
+                data["rel_strength_vs_spy"] = fh_fin["fh_rel_strength_13w"]
+            if fh_fin.get("fh_52w_high") is not None:
+                data["52w_high"] = fh_fin["fh_52w_high"]
+            if fh_fin.get("fh_52w_low") is not None:
+                data["52w_low"] = fh_fin["fh_52w_low"]
 
-            # Assign action + weight
-            result["action"] = assign_action(result, portfolio, mode="CORE")
-            result["suggested_weight_pct"] = calc_suggested_weight(result)
-
-            scored.append(result)
-            time.sleep(0.3)  # rate limit yfinance
-
+            scored.append(score_ticker(data, market_ctx, spy_momentum, fh["analyst_events"], fh["insider_events"]))
         except Exception as e:
             failed.append(ticker)
             if verbose:
-                print(f"\n  [ERROR] {ticker}: {e}")
+                            print(f"\n  [ERROR] {ticker}: {e}")
 
     print(f"\r  Scored: {len(scored)} | Failed/Skipped: {len(failed)}")
     if failed and verbose:
@@ -173,6 +168,11 @@ def run(tickers: list = None, portfolio: dict = None, demo: bool = False,
     # HTML
     html_path = write_html(mode_result, scored)
     print(f"  HTML: {html_path}")
+    latest_html_path = os.path.join(os.path.dirname(html_path), "latest.html")
+
+    if open_dashboard and os.path.exists(latest_html_path):
+        webbrowser.open(f"file://{os.path.abspath(latest_html_path)}")
+        print(f"  Dashboard: {latest_html_path}")
 
     # DB — add these lines
     from data.db_writer import write_run
@@ -215,10 +215,15 @@ if __name__ == "__main__":
         "--verbose", "-v", action="store_true",
         help="Show detailed errors and skipped tickers"
     )
+    parser.add_argument(
+        "--no-open", action="store_true",
+        help="Do not auto-open reports/latest.html after the run"
+    )
     args = parser.parse_args()
 
     results = run(
         tickers=args.tickers,
         demo=args.demo,
         verbose=args.verbose,
+        open_dashboard=not args.no_open,
     )

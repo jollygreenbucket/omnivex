@@ -147,38 +147,34 @@ def get_insider_events(ticker: str, lookback_days: int = 30) -> list:
 # ─────────────────────────────────────────────
 
 def get_earnings_surprise_score(ticker: str) -> float:
-    """
-    Get post-earnings move score (0-100) based on recent earnings surprises.
-    Higher = bigger/more consistent earnings beats = higher severity/catalyst.
-    """
     data = _get("stock/earnings", {"symbol": ticker, "limit": 4})
     if not data or not isinstance(data, list) or len(data) == 0:
-        return 50.0  # neutral
+        return 50.0
 
-    surprises = []
-    for q in data:
-        actual = q.get("actual")
-        estimate = q.get("estimate")
-        if actual is not None and estimate is not None and estimate != 0:
-            surprise_pct = abs((actual - estimate) / abs(estimate)) * 100
-            surprises.append(surprise_pct)
+    surprises = [
+        q["surprisePercent"]
+        for q in data
+        if q.get("surprisePercent") is not None
+    ]
 
     if not surprises:
         return 50.0
 
-    avg_surprise = sum(surprises) / len(surprises)
+    avg_surprise = sum(abs(s) for s in surprises) / len(surprises)
+    beat_rate = sum(1 for s in surprises if s > 0) / len(surprises)
 
-    # Map surprise % to 0-100 score
-    if avg_surprise >= 20:
-        return 90.0
-    elif avg_surprise >= 10:
-        return 75.0
+    if avg_surprise >= 10 and beat_rate >= 0.75:
+        return 92.0
+    elif avg_surprise >= 5 and beat_rate >= 0.75:
+        return 80.0
     elif avg_surprise >= 5:
-        return 60.0
-    elif avg_surprise >= 2:
-        return 50.0
+        return 68.0
+    elif avg_surprise >= 2 and beat_rate >= 0.5:
+        return 58.0
+    elif beat_rate >= 0.75:
+        return 55.0
     else:
-        return 35.0
+        return 40.0
 
 
 # ─────────────────────────────────────────────
@@ -196,6 +192,7 @@ def get_finnhub_data(ticker: str) -> dict:
             "analyst_events": [],
             "insider_events": [],
             "earnings_surprise_score": 50.0,
+            "financials": {},
             "finnhub_available": False,
         }
 
@@ -204,10 +201,54 @@ def get_finnhub_data(ticker: str) -> dict:
     insider = get_insider_events(ticker)
     time.sleep(0.1)
     earnings = get_earnings_surprise_score(ticker)
+    time.sleep(0.1)
+    financials = get_financials(ticker)
 
     return {
         "analyst_events": analyst,
         "insider_events": insider,
         "earnings_surprise_score": earnings,
+        "financials": financials,
         "finnhub_available": True,
+    }
+
+def get_financials(ticker: str) -> dict:
+    """
+    Pull key financial metrics from Finnhub basic financials.
+    Returns flat dict of most useful metrics for scoring.
+    """
+    data = _get("stock/metric", {"symbol": ticker, "metric": "all"})
+    if not data or "metric" not in data:
+        return {}
+    
+    m = data["metric"]
+    return {
+        # ROIC — actual (replaces ROA proxy)
+        "fh_roic": m.get("roiTTM"),
+        # Quality metrics
+        "fh_gross_margin": m.get("grossMarginTTM"),
+        "fh_operating_margin": m.get("operatingMarginTTM"),
+        "fh_net_margin": m.get("netProfitMarginTTM"),
+        "fh_roe": m.get("roeTTM"),
+        # Growth
+        "fh_revenue_growth": m.get("revenueGrowthTTMYoy"),
+        "fh_eps_growth": m.get("epsGrowthTTMYoy"),
+        # Valuation
+        "fh_peg": m.get("pegTTM"),
+        "fh_pe": m.get("peTTM"),
+        "fh_ev_ebitda": m.get("evEbitdaTTM"),
+        # Coverage & leverage
+        "fh_interest_coverage": m.get("netInterestCoverageAnnual"),
+        "fh_debt_equity": m.get("totalDebt/totalEquityAnnual"),
+        # Relative strength
+        "fh_rel_strength_13w": m.get("priceRelativeToS&P50013Week"),
+        "fh_rel_strength_26w": m.get("priceRelativeToS&P50026Week"),
+        # Beta
+        "fh_beta": m.get("beta"),
+        # Price returns
+        "fh_return_13w": m.get("13WeekPriceReturnDaily"),
+        "fh_return_26w": m.get("26WeekPriceReturnDaily"),
+        # 52W range
+        "fh_52w_high": m.get("52WeekHigh"),
+        "fh_52w_low": m.get("52WeekLow"),
     }

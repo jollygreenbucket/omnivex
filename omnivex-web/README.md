@@ -51,6 +51,11 @@ Vercel
 **In Vercel** (Settings → Environment Variables):
 ```
 POSTGRES_URL = your_connection_string
+GITHUB_TOKEN = your_github_token_with_actions_access
+GITHUB_REPO_OWNER = jollygreenbucket           # optional override
+GITHUB_REPO_NAME = omnivex                     # optional override
+GITHUB_WORKFLOW_REF = main                     # optional override
+GITHUB_WORKFLOW_ID = daily-scorer.yml          # optional override
 ```
 
 **In GitHub** (Settings → Secrets → Actions):
@@ -61,6 +66,12 @@ VERCEL_DEPLOY_HOOK = your_vercel_deploy_hook_url
 
 To get your Vercel deploy hook:
 Vercel → Project Settings → Git → Deploy Hooks → Create Hook
+
+For `GITHUB_TOKEN`, use a GitHub token that can:
+- dispatch Actions workflows
+- read workflow run status
+
+If you keep using `jollygreenbucket/omnivex` on `main`, only `GITHUB_TOKEN` is strictly required. The other GitHub env vars are there if you want to point the dashboard at a different repo, branch, or workflow file later.
 
 ### 5. Test the Scorer Locally
 
@@ -82,6 +93,11 @@ Go to GitHub → Actions → Omnivex Daily Scorer → Run workflow
 The scorer runs automatically at **4:30 PM EST every weekday** via GitHub Actions.
 
 **Manual run:** GitHub → Actions → Omnivex Daily Scorer → Run workflow
+
+**Dashboard-triggered run:** Use the `Run Daily` button in the Vercel header. The dashboard will:
+- dispatch `.github/workflows/daily-scorer.yml`
+- poll GitHub Actions for status
+- refresh the latest Neon-backed data after a successful run
 
 **Dashboard:** Your Vercel URL (e.g. `omnivex.vercel.app`)
 
