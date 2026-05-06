@@ -19,6 +19,10 @@ on:
         description: 'Weighting scheme (equal or score)'
         required: false
         default: 'equal'
+      slippage_bps:
+        description: 'Slippage per side in basis points'
+        required: false
+        default: '10'
 
 jobs:
   backtest:
@@ -46,7 +50,8 @@ jobs:
             --start-date "${{ github.event.inputs.start_date }}" \
             --end-date "${{ github.event.inputs.end_date }}" \
             --top-n "${{ github.event.inputs.top_n }}" \
-            --weighting "${{ github.event.inputs.weighting }}"
+            --weighting "${{ github.event.inputs.weighting }}" \
+            --slippage-bps "${{ github.event.inputs.slippage_bps }}"
 
       - name: Trigger Vercel redeploy
         if: success()

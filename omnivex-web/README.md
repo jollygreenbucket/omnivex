@@ -12,14 +12,14 @@ GitHub Repo
 ```
 
 ```
-GitHub Actions (daily cron @ 4:30 PM EST)
+GitHub Actions (daily cron @ ~4:30 PM America/Chicago)
     → run_daily.py
-    → writes to Vercel Postgres
+    → writes to Neon / Postgres
     → triggers Vercel redeploy
 
 Vercel
     → serves Next.js dashboard
-    → API routes query Vercel Postgres live
+    → API routes query Neon / Postgres live
     → accessible from anywhere
 ```
 
@@ -34,11 +34,10 @@ Vercel
 3. Set **Root Directory** to `omnivex-web`
 4. Deploy
 
-### 2. Create Vercel Postgres Database
+### 2. Create Neon / Postgres Database
 
-1. In your Vercel project → Storage tab → Create Database → Postgres
-2. Name it `omnivex-db`
-3. Copy the `POSTGRES_URL` connection string
+1. Create or reuse your Neon Postgres database
+2. Copy the `POSTGRES_URL` connection string
 
 ### 3. Run the Database Schema
 
@@ -115,13 +114,30 @@ Omnivex now includes a replay backtest foundation:
 - Web schema: `omnivex-web/scripts/schema_backtests.sql`
 - GitHub Actions workflow: `.github/workflows/backtest.yml`
 
-This first version replays historical Omnivex runs already stored in Neon and measures next-period performance of the top `BUY`/`ADD` names until the next recorded run.
+This first version now exposes a defined baseline strategy:
+
+- long-only
+- top 10 `BUY` / `ADD`
+- equal weight by default
+- rebalance on each recorded Omnivex run
+- next-session execution approximation
+- 10 bps slippage per side
+- SPY benchmark
+
+Under the hood it replays historical Omnivex runs already stored in Neon and measures next-period performance until the next recorded run.
 
 Run locally:
 
 ```bash
 cd omnivex
 python run_backtest.py --top-n 10 --weighting equal
+```
+
+If you already created `backtest_runs` before the turnover metric was added, rerun `omnivex-web/scripts/schema_backtests.sql` or execute:
+
+```sql
+ALTER TABLE backtest_runs
+ADD COLUMN IF NOT EXISTS turnover_pct DECIMAL(10,2);
 ```
 
 Run in GitHub Actions:

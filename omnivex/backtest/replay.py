@@ -29,6 +29,7 @@ class ReplayConfig:
     actions: tuple[str, ...] = ("BUY", "ADD")
     weighting: str = "equal"
     benchmark: str = "SPY"
+    slippage_bps: float = 10.0
 
 
 def _load_runs(config: ReplayConfig) -> pd.DataFrame:
@@ -73,12 +74,16 @@ def _load_scores(run_date: str, actions: Iterable[str], top_n: int) -> pd.DataFr
         conn.close()
 
 
-def _download_prices(tickers: list[str], start_date: str, end_date: str) -> dict[str, float]:
+def _download_prices(tickers: list[str], start_date: str, end_date: str) -> dict[str, tuple[float, float]]:
     if not tickers:
         return {}
 
-    prices: dict[str, float] = {}
-    end_exclusive = (pd.to_datetime(end_date).date() + timedelta(days=1)).isoformat()
+    prices: dict[str, tuple[float, float]] = {}
+    start_dt = pd.to_datetime(start_date).date()
+    end_dt = pd.to_datetime(end_date).date()
+    # Pull extra forward data so we can approximate "trade on the next session"
+    # using the first available daily close strictly after each run date.
+    end_exclusive = (end_dt + timedelta(days=7)).isoformat()
     data = yf.download(
         tickers=tickers,
         start=start_date,
@@ -95,8 +100,11 @@ def _download_prices(tickers: list[str], start_date: str, end_date: str) -> dict
                 close = data["Close"].dropna()
             else:
                 close = data[ticker]["Close"].dropna()
-            if len(close) >= 2:
-                prices[ticker] = float(close.iloc[0]), float(close.iloc[-1])
+            close.index = pd.to_datetime(close.index)
+            entry_candidates = close[close.index.date > start_dt]
+            exit_candidates = close[close.index.date > end_dt]
+            if not entry_candidates.empty and not exit_candidates.empty:
+                prices[ticker] = float(entry_candidates.iloc[0]), float(exit_candidates.iloc[0])
         except Exception:
             continue
 
@@ -112,6 +120,7 @@ def _period_metrics(equity_curve: pd.DataFrame) -> dict[str, float | int | None]
             "sharpe": None,
             "max_drawdown_pct": None,
             "periods": 0,
+            "turnover_pct": None,
         }
 
     returns = equity_curve["portfolio_return"].fillna(0.0)
@@ -139,6 +148,7 @@ def _period_metrics(equity_curve: pd.DataFrame) -> dict[str, float | int | None]
         "sharpe": round(float(sharpe), 3),
         "max_drawdown_pct": round(max_drawdown * 100, 2),
         "periods": periods,
+        "turnover_pct": round(float(equity_curve["turnover_pct"].fillna(0).mean()), 2) if "turnover_pct" in equity_curve else None,
     }
 
 
@@ -149,6 +159,7 @@ def run_replay_backtest(config: ReplayConfig) -> dict:
 
     periods: list[dict] = []
     benchmark_rows: list[dict] = []
+    previous_weights: dict[str, float] = {}
 
     for idx in range(len(runs) - 1):
         run_date = pd.to_datetime(runs.iloc[idx]["run_date"]).date().isoformat()
@@ -170,6 +181,8 @@ def run_replay_backtest(config: ReplayConfig) -> dict:
             if not entry:
                 continue
             ret = (exit_ / entry) - 1
+            slippage = (config.slippage_bps / 10_000) * 2
+            net_ret = ret - slippage
             valid_rows.append(
                 {
                     "ticker": ticker,
@@ -177,7 +190,8 @@ def run_replay_backtest(config: ReplayConfig) -> dict:
                     "next_run_date": next_run_date,
                     "entry_price": round(entry, 4),
                     "exit_price": round(exit_, 4),
-                    "return_pct": round(ret * 100, 4),
+                    "gross_return_pct": round(ret * 100, 4),
+                    "return_pct": round(net_ret * 100, 4),
                     "omnivex_score": float(score["omnivex_score"] or 0),
                     "suggested_weight_pct": float(score["suggested_weight_pct"] or 0),
                     "tier": score["tier"],
@@ -191,9 +205,19 @@ def run_replay_backtest(config: ReplayConfig) -> dict:
         period_df = pd.DataFrame(valid_rows)
         if config.weighting == "score":
             weights = period_df["suggested_weight_pct"].replace(0, 1.0)
+            normalized_weights = (weights / weights.sum()).tolist()
             portfolio_return = float((weights * (period_df["return_pct"] / 100)).sum() / weights.sum())
         else:
+            normalized_weights = [1 / len(period_df)] * len(period_df)
             portfolio_return = float((period_df["return_pct"] / 100).mean())
+
+        current_weights = {
+            row["ticker"]: normalized_weights[i]
+            for i, row in enumerate(valid_rows)
+        }
+        all_tickers = set(previous_weights) | set(current_weights)
+        turnover = sum(abs(current_weights.get(ticker, 0.0) - previous_weights.get(ticker, 0.0)) for ticker in all_tickers)
+        previous_weights = current_weights
 
         bench_prices = _download_prices([config.benchmark], run_date, next_run_date)
         bench_pair = bench_prices.get(config.benchmark)
@@ -207,6 +231,7 @@ def run_replay_backtest(config: ReplayConfig) -> dict:
                 "holdings": len(period_df),
                 "portfolio_return": portfolio_return,
                 "benchmark_return": bench_return,
+                "turnover_pct": turnover * 100,
             }
         )
         benchmark_rows.extend(valid_rows)
@@ -241,12 +266,12 @@ def persist_backtest(result: dict) -> int:
             INSERT INTO backtest_runs (
                 strategy_name, engine, benchmark, start_date, end_date,
                 top_n, weighting, total_return_pct, cagr_pct, volatility_pct,
-                sharpe, max_drawdown_pct, periods, status, notes
-            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                sharpe, max_drawdown_pct, turnover_pct, periods, status, notes
+            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             RETURNING id
             """,
             (
-                "Omnivex Replay",
+                "Omnivex Baseline v1",
                 "replay",
                 config.benchmark,
                 equity_curve["run_date"].iloc[0],
@@ -258,9 +283,10 @@ def persist_backtest(result: dict) -> int:
                 metrics["volatility_pct"],
                 metrics["sharpe"],
                 metrics["max_drawdown_pct"],
+                metrics["turnover_pct"],
                 metrics["periods"],
                 "COMPLETED",
-                "Replay of recorded Omnivex runs using next-run holding periods.",
+                f"Long-only top {config.top_n} BUY/ADD names, {config.weighting} weighting, next-run rebalance, {config.slippage_bps:.0f} bps slippage per side.",
             ),
         )
         backtest_id = cur.fetchone()[0]

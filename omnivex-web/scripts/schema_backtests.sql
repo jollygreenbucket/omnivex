@@ -17,11 +17,15 @@ CREATE TABLE IF NOT EXISTS backtest_runs (
     volatility_pct      DECIMAL(10,2),
     sharpe              DECIMAL(10,4),
     max_drawdown_pct    DECIMAL(10,2),
+    turnover_pct        DECIMAL(10,2),
     periods             INTEGER,
     status              VARCHAR(20) DEFAULT 'COMPLETED',
     notes               TEXT,
     created_at          TIMESTAMPTZ DEFAULT NOW()
 );
+
+ALTER TABLE backtest_runs
+    ADD COLUMN IF NOT EXISTS turnover_pct DECIMAL(10,2);
 
 CREATE TABLE IF NOT EXISTS backtest_equity_curve (
     id                      SERIAL PRIMARY KEY,

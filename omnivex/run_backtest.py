@@ -28,6 +28,7 @@ def main() -> int:
         help="Portfolio weighting scheme for selected names",
     )
     parser.add_argument("--benchmark", default="SPY", help="Benchmark ticker")
+    parser.add_argument("--slippage-bps", type=float, default=10.0, help="Slippage per side in basis points")
     args = parser.parse_args()
 
     config = ReplayConfig(
@@ -36,6 +37,7 @@ def main() -> int:
         top_n=args.top_n,
         weighting=args.weighting,
         benchmark=args.benchmark,
+        slippage_bps=args.slippage_bps,
     )
     result = run_replay_backtest(config)
     backtest_id = persist_backtest(result)
@@ -49,6 +51,7 @@ def main() -> int:
     print(f"  Volatility:  {metrics['volatility_pct']}%")
     print(f"  Sharpe:      {metrics['sharpe']}")
     print(f"  Max DD:      {metrics['max_drawdown_pct']}%")
+    print(f"  Turnover:    {metrics['turnover_pct']}% avg/rebalance")
     return 0
 
 

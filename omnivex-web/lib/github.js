@@ -1,5 +1,6 @@
 const GITHUB_API_BASE = 'https://api.github.com'
 const DEFAULT_WORKFLOW_FILE = 'daily-scorer.yml'
+const DEFAULT_BACKTEST_WORKFLOW_FILE = 'backtest.yml'
 const DEFAULT_OWNER = 'jollygreenbucket'
 const DEFAULT_REPO = 'omnivex'
 const DEFAULT_BRANCH = 'main'
@@ -64,6 +65,47 @@ export async function dispatchDailyWorkflow({ demo = false } = {}) {
 
 export async function getLatestDailyWorkflowRun() {
   const { owner, repo, workflowId, branch } = getGithubConfig()
+  return getLatestWorkflowRun({ owner, repo, workflowId, branch })
+}
+
+export async function dispatchBacktestWorkflow({
+  startDate = '',
+  endDate = '',
+  topN = '10',
+  weighting = 'equal',
+  slippageBps = '10',
+} = {}) {
+  const { owner, repo, branch } = getGithubConfig()
+
+  await githubFetch(`/repos/${owner}/${repo}/actions/workflows/${DEFAULT_BACKTEST_WORKFLOW_FILE}/dispatches`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      ref: branch,
+      inputs: {
+        start_date: String(startDate || ''),
+        end_date: String(endDate || ''),
+        top_n: String(topN || '10'),
+        weighting: String(weighting || 'equal'),
+        slippage_bps: String(slippageBps || '10'),
+      },
+    }),
+  })
+
+  return { ok: true }
+}
+
+export async function getLatestBacktestWorkflowRun() {
+  const { owner, repo, branch } = getGithubConfig()
+  return getLatestWorkflowRun({
+    owner,
+    repo,
+    workflowId: DEFAULT_BACKTEST_WORKFLOW_FILE,
+    branch,
+  })
+}
+
+async function getLatestWorkflowRun({ owner, repo, workflowId, branch }) {
   const data = await githubFetch(
     `/repos/${owner}/${repo}/actions/workflows/${workflowId}/runs?per_page=1&branch=${encodeURIComponent(branch)}`
   )

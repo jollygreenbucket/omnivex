@@ -166,6 +166,16 @@ export default function Omnivex() {
   const [backtestData, setBacktestData] = useState(null)
   const [selectedBacktestId, setSelectedBacktestId] = useState(null)
   const [backtestDetail, setBacktestDetail] = useState(null)
+  const [backtestStatus, setBacktestStatus] = useState(null)
+  const [triggeringBacktest, setTriggeringBacktest] = useState(false)
+  const [backtestError, setBacktestError] = useState(null)
+  const [backtestForm, setBacktestForm] = useState({
+    startDate: '',
+    endDate: '',
+    topN: '10',
+    weighting: 'equal',
+    slippageBps: '10',
+  })
   const [runStatus, setRunStatus] = useState(null)
   const [triggeringRun, setTriggeringRun] = useState(false)
   const [runError, setRunError] = useState(null)
@@ -193,9 +203,16 @@ export default function Omnivex() {
   }
 
   async function loadRunStatus() {
-    const response = await fetch('/api/run-status')
-    const data = await response.json()
-    setRunStatus(data.run || null)
+    const [dailyResponse, backtestResponse] = await Promise.all([
+      fetch('/api/run-status'),
+      fetch('/api/backtest-status').catch(() => null),
+    ])
+    const dailyData = await dailyResponse.json()
+    setRunStatus(dailyData.run || null)
+    if (backtestResponse) {
+      const backtestData = await backtestResponse.json()
+      setBacktestStatus(backtestData.run || null)
+    }
   }
 
   useEffect(() => {
@@ -222,6 +239,28 @@ export default function Omnivex() {
     setBacktestDetail(null)
     fetch(`/api/backtests?id=${selectedBacktestId}`).then(r => r.json()).then(setBacktestDetail)
   }, [selectedBacktestId])
+
+  useEffect(() => {
+    if (!backtestStatus || !['queued', 'in_progress'].includes(backtestStatus.status)) return
+
+    const poll = setInterval(async () => {
+      try {
+        const response = await fetch('/api/backtest-status')
+        const data = await response.json()
+        const nextRun = data.run || null
+        setBacktestStatus(nextRun)
+
+        if (nextRun && !['queued', 'in_progress'].includes(nextRun.status)) {
+          if (nextRun.conclusion === 'success') {
+            await loadDashboardData()
+          }
+          setTriggeringBacktest(false)
+        }
+      } catch {}
+    }, 10000)
+
+    return () => clearInterval(poll)
+  }, [backtestStatus])
 
   useEffect(() => {
     if (!runStatus || !['queued', 'in_progress'].includes(runStatus.status)) return
@@ -264,6 +303,25 @@ export default function Omnivex() {
     } catch (err) {
       setRunError(err.message)
       setTriggeringRun(false)
+    }
+  }
+
+  async function handleRunBacktest() {
+    setTriggeringBacktest(true)
+    setBacktestError(null)
+
+    try {
+      const response = await fetch('/api/run-backtest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(backtestForm),
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'Failed to trigger backtest workflow')
+      setBacktestStatus(data.run || { status: 'queued', conclusion: null })
+    } catch (err) {
+      setBacktestError(err.message)
+      setTriggeringBacktest(false)
     }
   }
 
@@ -346,6 +404,19 @@ export default function Omnivex() {
     workflowRunning ? '#e0a832' :
     workflowSucceeded ? '#2de0aa' :
     workflowFailed ? '#f05555' :
+    '#6a7290'
+  const backtestRunning = ['queued', 'in_progress'].includes(backtestStatus?.status)
+  const backtestButtonDisabled = triggeringBacktest || backtestRunning
+  const backtestButtonLabel = backtestRunning ? 'Backtest Running' : triggeringBacktest ? 'Starting Backtest...' : 'Run Backtest'
+  const backtestStatusLabel =
+    backtestRunning ? `${backtestStatus.status === 'queued' ? 'Queued' : 'Running'} · #${backtestStatus?.runNumber || '—'}` :
+    backtestStatus?.status === 'completed' && backtestStatus?.conclusion === 'success' ? `Last backtest succeeded · #${backtestStatus?.runNumber || '—'}` :
+    backtestStatus?.status === 'completed' && backtestStatus?.conclusion ? `Last backtest ${backtestStatus.conclusion}` :
+    'Ready'
+  const backtestStatusColor =
+    backtestRunning ? '#e0a832' :
+    backtestStatus?.status === 'completed' && backtestStatus?.conclusion === 'success' ? '#2de0aa' :
+    backtestStatus?.status === 'completed' && backtestStatus?.conclusion ? '#f05555' :
     '#6a7290'
 
   return (
@@ -956,24 +1027,89 @@ export default function Omnivex() {
         {/* ══ BACKTESTS TAB ══ */}
         {tab === 'backtests' && (
           <div>
+            {backtestError && (
+              <div className="card" style={{ marginBottom: 16, borderTop: '3px solid var(--hedge)', color: 'var(--silver)' }}>
+                <div className="label" style={{ color: 'var(--hedge)', marginBottom: 8 }}>Backtest Trigger Error</div>
+                <div style={{ fontSize: 13 }}>{backtestError}</div>
+              </div>
+            )}
+
             <div className="card anim-1" style={{ marginBottom: 20 }}>
-              <div className="label" style={{ marginBottom: 12, fontSize: 11 }}>Backtest Foundation</div>
-              <div style={{ color: 'var(--silver)', fontSize: 14, lineHeight: 1.6 }}>
-                Omnivex now includes a replay backtest foundation in the Python repo. It replays recorded
-                historical Omnivex runs from Neon and measures the next-period performance of top BUY/ADD
-                names. This uses actual stored Omnivex signals, not reconstructed historical fundamentals.
+              <div className="label" style={{ marginBottom: 12, fontSize: 11 }}>Omnivex Baseline v1</div>
+              <div style={{ color: 'var(--silver)', fontSize: 14, lineHeight: 1.7 }}>
+                This page models a long-only baseline portfolio that buys the top 10 <code>BUY</code>/<code>ADD</code> names from each recorded Omnivex run,
+                weights them equally, rebalances on the next recorded run, and compares results to SPY.
+                Execution is assumed on the next trading session with 10 bps slippage per side. Unused capital remains in cash.
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 12, marginTop: 16 }}>
+                <div className="card card-sm"><div className="label">Selection</div><div className="stat-value" style={{ fontSize: 18 }}>Top 10 BUY/ADD</div></div>
+                <div className="card card-sm"><div className="label">Weighting</div><div className="stat-value" style={{ fontSize: 18 }}>Equal Weight</div></div>
+                <div className="card card-sm"><div className="label">Rebalance</div><div className="stat-value" style={{ fontSize: 18 }}>Each Omnivex Run</div></div>
+                <div className="card card-sm"><div className="label">Costs</div><div className="stat-value" style={{ fontSize: 18 }}>10 bps / side</div></div>
+              </div>
+            </div>
+
+            <div className="card anim-2" style={{ marginBottom: 20 }}>
+              <div className="label" style={{ marginBottom: 14, fontSize: 11 }}>Run Baseline Backtest</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr)) auto', gap: 12, alignItems: 'end' }}>
+                <div>
+                  <div className="label" style={{ marginBottom: 6, fontSize: 10 }}>Start Date</div>
+                  <input className="pq-input" type="date" value={backtestForm.startDate} onChange={e => setBacktestForm({ ...backtestForm, startDate: e.target.value })} />
+                </div>
+                <div>
+                  <div className="label" style={{ marginBottom: 6, fontSize: 10 }}>End Date</div>
+                  <input className="pq-input" type="date" value={backtestForm.endDate} onChange={e => setBacktestForm({ ...backtestForm, endDate: e.target.value })} />
+                </div>
+                <div>
+                  <div className="label" style={{ marginBottom: 6, fontSize: 10 }}>Top N</div>
+                  <input className="pq-input" type="number" min="1" max="50" value={backtestForm.topN} onChange={e => setBacktestForm({ ...backtestForm, topN: e.target.value })} />
+                </div>
+                <div>
+                  <div className="label" style={{ marginBottom: 6, fontSize: 10 }}>Weighting</div>
+                  <select className="pq-input" value={backtestForm.weighting} onChange={e => setBacktestForm({ ...backtestForm, weighting: e.target.value })}>
+                    <option value="equal">Equal Weight</option>
+                    <option value="score">Suggested Weight</option>
+                  </select>
+                </div>
+                <div>
+                  <div className="label" style={{ marginBottom: 6, fontSize: 10 }}>Slippage (bps/side)</div>
+                  <input className="pq-input" type="number" min="0" max="100" value={backtestForm.slippageBps} onChange={e => setBacktestForm({ ...backtestForm, slippageBps: e.target.value })} />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+                  <button
+                    onClick={handleRunBacktest}
+                    disabled={backtestButtonDisabled}
+                    style={{
+                      background: backtestButtonDisabled ? '#232840' : accent,
+                      color: backtestButtonDisabled ? '#9aa3c7' : '#071018',
+                      border: 'none',
+                      borderRadius: 6,
+                      padding: '10px 16px',
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: 12,
+                      fontWeight: 700,
+                      letterSpacing: '.04em',
+                      cursor: backtestButtonDisabled ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    {backtestButtonLabel}
+                  </button>
+                  <span style={{ fontSize: 10, color: backtestStatusColor, fontFamily: 'var(--font-mono)' }}>
+                    {backtestStatusLabel}
+                  </span>
+                </div>
               </div>
             </div>
 
             <div className="card anim-2" style={{ padding: 0, overflow: 'hidden', marginBottom: 20 }}>
               <div style={{ padding: '18px 20px', borderBottom: '1px solid var(--ink-3)', background: 'var(--ink-2)' }}>
-                <span className="label" style={{ fontSize: 11 }}>Recent Backtests</span>
+                <span className="label" style={{ fontSize: 11 }}>Recent Baseline Runs</span>
               </div>
               <div style={{ overflowX: 'auto' }}>
                 <table className="pq-table">
                   <thead>
                     <tr>
-                      <th>ID</th><th>Strategy</th><th>Engine</th><th>Return</th><th>CAGR</th><th>Sharpe</th><th>Max DD</th><th>Created</th>
+                      <th>ID</th><th>Strategy</th><th>Engine</th><th>Return</th><th>CAGR</th><th>Sharpe</th><th>Max DD</th><th>Turnover</th><th>Created</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -986,11 +1122,12 @@ export default function Omnivex() {
                         <td style={{ fontFamily: 'var(--font-mono)' }}>{fmt(run.cagr_pct, 2)}%</td>
                         <td style={{ fontFamily: 'var(--font-mono)' }}>{fmt(run.sharpe, 2)}</td>
                         <td className="c-neg" style={{ fontFamily: 'var(--font-mono)' }}>{fmt(run.max_drawdown_pct, 2)}%</td>
+                        <td style={{ fontFamily: 'var(--font-mono)' }}>{fmt(run.turnover_pct, 2)}%</td>
                         <td style={{ fontFamily: 'var(--font-mono)', color: 'var(--silver)' }}>{fmtDate(run.created_at)}</td>
                       </tr>
                     ))}
                     {!backtestData?.runs?.length && (
-                      <tr><td colSpan={8} style={{ color: 'var(--silver-2)', textAlign: 'center', padding: 40, fontSize: 14 }}>No backtests saved yet. Run `python run_backtest.py` after applying the backtest schema.</td></tr>
+                      <tr><td colSpan={9} style={{ color: 'var(--silver-2)', textAlign: 'center', padding: 40, fontSize: 14 }}>No baseline backtests saved yet. Run `python run_backtest.py` after applying the backtest schema.</td></tr>
                     )}
                   </tbody>
                 </table>
@@ -1005,7 +1142,7 @@ export default function Omnivex() {
                   <>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
                       <div>
-                        <div className="label" style={{ marginBottom: 6, fontSize: 11 }}>Backtest Detail</div>
+                        <div className="label" style={{ marginBottom: 6, fontSize: 11 }}>Baseline Detail</div>
                         <div style={{ fontFamily: 'var(--font-serif)', fontSize: 24, color: 'var(--gold)', fontWeight: 500 }}>
                           {backtestDetail.run.strategy_name} #{backtestDetail.run.id}
                         </div>
@@ -1018,12 +1155,13 @@ export default function Omnivex() {
                       </button>
                     </div>
 
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 12, marginBottom: 18 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 12, marginBottom: 18 }}>
                       <StatCard label="Return" value={`${fmt(backtestDetail.run.total_return_pct, 2)}%`} accent="var(--alpha)" />
                       <StatCard label="CAGR" value={`${fmt(backtestDetail.run.cagr_pct, 2)}%`} />
                       <StatCard label="Sharpe" value={fmt(backtestDetail.run.sharpe, 2)} accent={accent} />
                       <StatCard label="Volatility" value={`${fmt(backtestDetail.run.volatility_pct, 2)}%`} />
                       <StatCard label="Max DD" value={`${fmt(backtestDetail.run.max_drawdown_pct, 2)}%`} accent="var(--hedge)" />
+                      <StatCard label="Turnover" value={`${fmt(backtestDetail.run.turnover_pct, 2)}%`} />
                       <StatCard label="Periods" value={backtestDetail.run.periods} />
                     </div>
 
