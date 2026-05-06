@@ -11,6 +11,7 @@ import json
 from datetime import date
 
 from portfolio.allocator import build_target_portfolio
+from core.strategy import STRATEGY_VERSION, build_strategy_snapshot
 
 try:
     import psycopg2
@@ -64,6 +65,23 @@ def get_connection():
     return psycopg2.connect(url, sslmode="require")
 
 
+def _ensure_strategy_config(cur) -> int | None:
+    snapshot = build_strategy_snapshot()
+    cur.execute(
+        """
+        INSERT INTO strategy_configs (version, config_json)
+        VALUES (%s, %s::jsonb)
+        ON CONFLICT (version) DO UPDATE SET
+            config_json = EXCLUDED.config_json,
+            updated_at = NOW()
+        RETURNING id
+        """,
+        (STRATEGY_VERSION, json.dumps(snapshot)),
+    )
+    row = cur.fetchone()
+    return row[0] if row else None
+
+
 def _load_portfolio_state(cur) -> tuple[list[dict], float | None, float]:
     cur.execute("""
         SELECT ticker, shares, avg_cost, current_price, market_value, tier
@@ -93,7 +111,7 @@ def _load_portfolio_state(cur) -> tuple[list[dict], float | None, float]:
     return holdings, total_value, cash
 
 
-def _write_portfolio_plan(cur, run_date: str, mode_result: dict, scored: list, portfolio_plan: dict | None = None):
+def _write_portfolio_plan(cur, run_date: str, mode_result: dict, scored: list, portfolio_plan: dict | None = None, strategy_config_id: int | None = None):
     holdings, total_value, cash = _load_portfolio_state(cur)
     plan = portfolio_plan or build_target_portfolio(
         mode_result,
@@ -113,8 +131,8 @@ def _write_portfolio_plan(cur, run_date: str, mode_result: dict, scored: list, p
             run_date, mode, portfolio_base_value, current_cash, target_cash_pct,
             target_smart_core_pct, target_tactical_pct, target_speculative_pct,
             current_smart_core_pct, current_tactical_pct, current_speculative_pct, current_cash_pct,
-            target_invested_pct, estimated_turnover_pct, max_positions, notes
-        ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            target_invested_pct, estimated_turnover_pct, max_positions, strategy_version, strategy_config_id, notes
+        ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         ON CONFLICT (run_date) DO UPDATE SET
             mode = EXCLUDED.mode,
             portfolio_base_value = EXCLUDED.portfolio_base_value,
@@ -130,6 +148,8 @@ def _write_portfolio_plan(cur, run_date: str, mode_result: dict, scored: list, p
             target_invested_pct = EXCLUDED.target_invested_pct,
             estimated_turnover_pct = EXCLUDED.estimated_turnover_pct,
             max_positions = EXCLUDED.max_positions,
+            strategy_version = EXCLUDED.strategy_version,
+            strategy_config_id = EXCLUDED.strategy_config_id,
             notes = EXCLUDED.notes
         """,
         (
@@ -148,6 +168,8 @@ def _write_portfolio_plan(cur, run_date: str, mode_result: dict, scored: list, p
             plan.get("target_invested_pct"),
             plan.get("estimated_turnover_pct"),
             plan.get("max_positions"),
+            STRATEGY_VERSION,
+            strategy_config_id,
             " | ".join(plan.get("notes", [])),
         ),
     )
@@ -267,6 +289,7 @@ def write_run(mode_result: dict, scored: list, run_date: str = None, portfolio_p
     try:
         conn = get_connection()
         cur = conn.cursor()
+        strategy_config_id = _ensure_strategy_config(cur)
 
         # ── Insert run metadata ──
         buys = sum(1 for s in scored if s.get("action") in ("BUY", "ADD"))
@@ -278,8 +301,9 @@ def write_run(mode_result: dict, scored: list, run_date: str = None, portfolio_p
                 run_date, mode, chop_guard, vix, ad_ratio, spy_daily_pct,
                 spy_above_50dma, spy_above_200dma, yield_curve_state,
                 alpha_trigger_count, hedge_trigger_count,
-                tickers_scored, tickers_flagged, tickers_buy, tickers_reduce
-            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                tickers_scored, tickers_flagged, tickers_buy, tickers_reduce,
+                strategy_version, strategy_config_id
+            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             ON CONFLICT (run_date) DO UPDATE SET
                 mode = EXCLUDED.mode,
                 chop_guard = EXCLUDED.chop_guard,
@@ -291,7 +315,9 @@ def write_run(mode_result: dict, scored: list, run_date: str = None, portfolio_p
                 tickers_scored = EXCLUDED.tickers_scored,
                 tickers_flagged = EXCLUDED.tickers_flagged,
                 tickers_buy = EXCLUDED.tickers_buy,
-                tickers_reduce = EXCLUDED.tickers_reduce
+                tickers_reduce = EXCLUDED.tickers_reduce,
+                strategy_version = EXCLUDED.strategy_version,
+                strategy_config_id = EXCLUDED.strategy_config_id
         """, (
             today,
             mode_result.get("mode", "CORE"),
@@ -305,6 +331,8 @@ def write_run(mode_result: dict, scored: list, run_date: str = None, portfolio_p
             mode_result.get("alpha_trigger_count", 0),
             mode_result.get("hedge_trigger_count", 0),
             len(scored), flagged, buys, reduces,
+            STRATEGY_VERSION,
+            strategy_config_id,
         ))
 
         # ── Insert mode history ──
@@ -387,7 +415,7 @@ def write_run(mode_result: dict, scored: list, run_date: str = None, portfolio_p
         """, score_rows)
 
         try:
-            _write_portfolio_plan(cur, today, mode_result, scored, portfolio_plan=portfolio_plan)
+            _write_portfolio_plan(cur, today, mode_result, scored, portfolio_plan=portfolio_plan, strategy_config_id=strategy_config_id)
         except Exception as portfolio_error:
             print(f"  [DB] Portfolio plan write skipped: {portfolio_error}")
 

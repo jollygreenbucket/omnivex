@@ -375,6 +375,7 @@ export default function Omnivex() {
   const allocation = portData?.allocation || []
   const snap = portData?.snapshot
   const rebalance = portData?.rebalance
+  const strategyConfig = dashData?.strategyConfig
 
   const totalValue = holdings.reduce((s, h) => s + (h.market_value || 0), 0)
   const totalPnl = holdings.reduce((s, h) => s + (h.unrealized_pnl || 0), 0)
@@ -446,6 +447,12 @@ export default function Omnivex() {
           ))}
         </nav>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+            <span className="label" style={{ fontSize: 9 }}>Strategy</span>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--silver)' }}>
+              {run?.strategy_version || strategyConfig?.version || 'legacy'}
+            </span>
+          </div>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
             <button
               onClick={handleRunDaily}
@@ -986,7 +993,7 @@ export default function Omnivex() {
                         <StatCard label="SPY" value={`${(runDetail.run.spy_daily_pct||0)>=0?'+':''}${fmt(runDetail.run.spy_daily_pct)}%`} accent={(runDetail.run.spy_daily_pct||0)>=0?'var(--alpha)':'var(--hedge)'} />
                         <StatCard label="Scored" value={runDetail.run.tickers_scored} />
                         <StatCard label="Buys / Reduces" value={`${runDetail.run.tickers_buy || 0} / ${runDetail.run.tickers_reduce || 0}`} />
-                        <StatCard label="Flags" value={runDetail.run.tickers_flagged || 0} accent="var(--gold)" />
+                        <StatCard label="Version" value={runDetail.run.strategy_version || 'legacy'} accent="var(--gold)" />
                       </div>
 
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
@@ -1118,7 +1125,7 @@ export default function Omnivex() {
                 <table className="pq-table">
                   <thead>
                     <tr>
-                      <th>ID</th><th>Strategy</th><th>Engine</th><th>Return</th><th>CAGR</th><th>Sharpe</th><th>Max DD</th><th>Turnover</th><th>Created</th>
+                      <th>ID</th><th>Strategy</th><th>Version</th><th>Engine</th><th>Return</th><th>CAGR</th><th>Sharpe</th><th>Max DD</th><th>Turnover</th><th>Created</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1126,6 +1133,7 @@ export default function Omnivex() {
                       <tr key={run.id} onClick={() => setSelectedBacktestId(run.id)}>
                         <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 700 }}>{run.id}</td>
                         <td><span style={{ fontWeight: 600 }}>{run.strategy_name}</span></td>
+                        <td style={{ fontFamily: 'var(--font-mono)', color: 'var(--silver)' }}>{run.strategy_version || 'legacy'}</td>
                         <td style={{ fontFamily: 'var(--font-mono)', color: 'var(--silver)' }}>{run.engine}</td>
                         <td className={(run.total_return_pct || 0) >= 0 ? 'c-pos' : 'c-neg'} style={{ fontFamily: 'var(--font-mono)', fontWeight: 700 }}>{fmt(run.total_return_pct, 2)}%</td>
                         <td style={{ fontFamily: 'var(--font-mono)' }}>{fmt(run.cagr_pct, 2)}%</td>
@@ -1136,7 +1144,7 @@ export default function Omnivex() {
                       </tr>
                     ))}
                     {!backtestData?.runs?.length && (
-                      <tr><td colSpan={9} style={{ color: 'var(--silver-2)', textAlign: 'center', padding: 40, fontSize: 14 }}>No baseline backtests saved yet. Run `python run_backtest.py` after applying the backtest schema.</td></tr>
+                      <tr><td colSpan={10} style={{ color: 'var(--silver-2)', textAlign: 'center', padding: 40, fontSize: 14 }}>No baseline backtests saved yet. Run `python run_backtest.py` after applying the backtest schema.</td></tr>
                     )}
                   </tbody>
                 </table>
@@ -1154,6 +1162,9 @@ export default function Omnivex() {
                         <div className="label" style={{ marginBottom: 6, fontSize: 11 }}>Baseline Detail</div>
                         <div style={{ fontFamily: 'var(--font-serif)', fontSize: 24, color: 'var(--gold)', fontWeight: 500 }}>
                           {backtestDetail.run.strategy_name} #{backtestDetail.run.id}
+                        </div>
+                        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--silver)', marginTop: 6 }}>
+                          {backtestDetail.run.strategy_version || 'legacy'}
                         </div>
                       </div>
                       <button

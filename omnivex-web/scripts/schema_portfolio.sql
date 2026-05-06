@@ -94,9 +94,17 @@ CREATE TABLE IF NOT EXISTS portfolio_target_summary (
     target_invested_pct      DECIMAL(8,4),
     estimated_turnover_pct   DECIMAL(8,4),
     max_positions            INTEGER,
+    strategy_version         VARCHAR(50),
+    strategy_config_id       INTEGER REFERENCES strategy_configs(id),
     notes                    TEXT,
     created_at               TIMESTAMPTZ DEFAULT NOW()
 );
+
+ALTER TABLE portfolio_target_summary
+    ADD COLUMN IF NOT EXISTS strategy_version VARCHAR(50);
+
+ALTER TABLE portfolio_target_summary
+    ADD COLUMN IF NOT EXISTS strategy_config_id INTEGER REFERENCES strategy_configs(id);
 
 CREATE TABLE IF NOT EXISTS portfolio_targets (
     id                       SERIAL PRIMARY KEY,

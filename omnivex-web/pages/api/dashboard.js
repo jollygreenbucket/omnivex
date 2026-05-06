@@ -1,6 +1,6 @@
 import {
   getLatestRun, getLatestScores, getModeHistory,
-  getTopMovers, getScoreDistribution, getRunHistory
+  getTopMovers, getScoreDistribution, getRunHistory, getLatestStrategyConfig
 } from '../../lib/db'
 
 export default async function handler(req, res) {
@@ -9,7 +9,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const [run, scores, modeHistory, movers, distribution, runHistory] =
+    const [run, scores, modeHistory, movers, distribution, runHistory, strategyConfig] =
       await Promise.all([
         getLatestRun(),
         getLatestScores(),
@@ -17,6 +17,7 @@ export default async function handler(req, res) {
         getTopMovers(10),
         getScoreDistribution(),
         getRunHistory(30),
+        getLatestStrategyConfig(),
       ])
 
     return res.status(200).json({
@@ -26,6 +27,7 @@ export default async function handler(req, res) {
       movers,
       distribution,
       runHistory,
+      strategyConfig,
       generatedAt: new Date().toISOString(),
     })
   } catch (err) {

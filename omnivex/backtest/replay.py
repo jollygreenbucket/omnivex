@@ -18,6 +18,7 @@ from typing import Iterable
 import pandas as pd
 import yfinance as yf
 
+from core.strategy import STRATEGY_VERSION
 from data.db_writer import get_connection
 
 
@@ -266,8 +267,8 @@ def persist_backtest(result: dict) -> int:
             INSERT INTO backtest_runs (
                 strategy_name, engine, benchmark, start_date, end_date,
                 top_n, weighting, total_return_pct, cagr_pct, volatility_pct,
-                sharpe, max_drawdown_pct, turnover_pct, periods, status, notes
-            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                sharpe, max_drawdown_pct, turnover_pct, periods, status, strategy_version, notes
+            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             RETURNING id
             """,
             (
@@ -286,6 +287,7 @@ def persist_backtest(result: dict) -> int:
                 metrics["turnover_pct"],
                 metrics["periods"],
                 "COMPLETED",
+                STRATEGY_VERSION,
                 f"Long-only top {config.top_n} BUY/ADD names, {config.weighting} weighting, next-run rebalance, {config.slippage_bps:.0f} bps slippage per side.",
             ),
         )

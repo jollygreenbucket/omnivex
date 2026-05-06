@@ -9,6 +9,20 @@ export async function getLatestRun() {
   return rows[0] || null
 }
 
+export async function getLatestStrategyConfig() {
+  try {
+    const rows = await sql`
+      SELECT *
+      FROM strategy_configs
+      ORDER BY updated_at DESC, id DESC
+      LIMIT 1
+    `
+    return rows[0] || null
+  } catch {
+    return null
+  }
+}
+
 export async function getLatestScores() {
   const rows = await sql`
     SELECT s.* FROM scores s

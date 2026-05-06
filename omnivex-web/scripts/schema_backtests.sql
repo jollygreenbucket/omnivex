@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS backtest_runs (
     id                  SERIAL PRIMARY KEY,
     strategy_name       VARCHAR(100) NOT NULL,
     engine              VARCHAR(40) NOT NULL,
+    strategy_version    VARCHAR(50),
     benchmark           VARCHAR(20) DEFAULT 'SPY',
     start_date          DATE,
     end_date            DATE,
@@ -26,6 +27,9 @@ CREATE TABLE IF NOT EXISTS backtest_runs (
 
 ALTER TABLE backtest_runs
     ADD COLUMN IF NOT EXISTS turnover_pct DECIMAL(10,2);
+
+ALTER TABLE backtest_runs
+    ADD COLUMN IF NOT EXISTS strategy_version VARCHAR(50);
 
 CREATE TABLE IF NOT EXISTS backtest_equity_curve (
     id                      SERIAL PRIMARY KEY,

@@ -4,6 +4,14 @@
 -- Run this once in your Vercel Postgres console
 -- ─────────────────────────────────────────────
 
+CREATE TABLE IF NOT EXISTS strategy_configs (
+    id           SERIAL PRIMARY KEY,
+    version      VARCHAR(50) NOT NULL UNIQUE,
+    config_json  JSONB NOT NULL,
+    created_at   TIMESTAMPTZ DEFAULT NOW(),
+    updated_at   TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Daily run metadata
 CREATE TABLE IF NOT EXISTS runs (
     id          SERIAL PRIMARY KEY,
@@ -22,8 +30,16 @@ CREATE TABLE IF NOT EXISTS runs (
     tickers_flagged INTEGER,
     tickers_buy INTEGER,
     tickers_reduce INTEGER,
+    strategy_version VARCHAR(50),
+    strategy_config_id INTEGER REFERENCES strategy_configs(id),
     created_at  TIMESTAMPTZ DEFAULT NOW()
 );
+
+ALTER TABLE runs
+    ADD COLUMN IF NOT EXISTS strategy_version VARCHAR(50);
+
+ALTER TABLE runs
+    ADD COLUMN IF NOT EXISTS strategy_config_id INTEGER REFERENCES strategy_configs(id);
 
 -- Per-ticker scores (one row per ticker per run)
 CREATE TABLE IF NOT EXISTS scores (
