@@ -213,6 +213,75 @@ export async function getPerformanceVsSpy(days = 90) {
 }
 
 export async function getRebalancePlan() {
+  try {
+    const summaryRows = await sql`
+      SELECT *
+      FROM portfolio_target_summary
+      ORDER BY run_date DESC
+      LIMIT 1
+    `
+    const summary = summaryRows[0] || null
+
+    if (summary) {
+      const rows = await sql`
+        SELECT *
+        FROM rebalance_recommendations
+        WHERE run_date = ${summary.run_date}::date
+        ORDER BY
+          CASE recommendation
+            WHEN 'OPEN' THEN 1
+            WHEN 'ADD' THEN 2
+            WHEN 'TRIM' THEN 3
+            WHEN 'EXIT' THEN 4
+            ELSE 5
+          END,
+          ABS(delta_value) DESC
+      `
+
+      return {
+        mode: summary.mode,
+        totalPortfolioValue: Number(summary.portfolio_base_value || 0),
+        cash: Number(summary.current_cash || 0),
+        rows: rows.map(row => ({
+          ...row,
+          omnivex_score: row.omnivex_score == null ? null : Number(row.omnivex_score),
+          signal_conf: row.signal_conf == null ? null : Number(row.signal_conf),
+          current_weight_pct: Number(row.current_weight_pct || 0),
+          target_weight_pct: Number(row.target_weight_pct || 0),
+          current_value: Number(row.current_value || 0),
+          target_value: Number(row.target_value || 0),
+          delta_weight_pct: Number(row.delta_weight_pct || 0),
+          delta_value: Number(row.delta_value || 0),
+          held: Boolean(row.held),
+        })),
+        summary: {
+          buyCount: rows.filter(row => row.recommendation === 'ADD').length,
+          trimCount: rows.filter(row => row.recommendation === 'TRIM').length,
+          exitCount: rows.filter(row => row.recommendation === 'EXIT').length,
+          openCount: rows.filter(row => row.recommendation === 'OPEN').length,
+          estimatedTurnoverPct: Number(summary.estimated_turnover_pct || 0),
+          maxPositions: Number(summary.max_positions || 0),
+          notes: summary.notes || '',
+          targetCashPct: Number(summary.target_cash_pct || 0),
+        },
+        targetAlloc: {
+          SMART_CORE: Number(summary.target_smart_core_pct || 0),
+          TACTICAL: Number(summary.target_tactical_pct || 0),
+          SPECULATIVE: Number(summary.target_speculative_pct || 0),
+          CASH: Number(summary.target_cash_pct || 0),
+        },
+        currentAlloc: {
+          SMART_CORE: Number(summary.current_smart_core_pct || 0),
+          TACTICAL: Number(summary.current_tactical_pct || 0),
+          SPECULATIVE: Number(summary.current_speculative_pct || 0),
+          CASH: Number(summary.current_cash_pct || 0),
+        },
+      }
+    }
+  } catch (error) {
+    console.warn('Allocator tables unavailable, falling back to legacy rebalance plan:', error.message)
+  }
+
   const [run, holdings, snapshot, scores] = await Promise.all([
     getLatestRun(),
     getHoldings(),
@@ -321,7 +390,13 @@ export async function getRebalancePlan() {
       trimCount: planRows.filter(row => row.recommendation === 'TRIM').length,
       exitCount: planRows.filter(row => row.recommendation === 'EXIT').length,
       openCount: planRows.filter(row => row.recommendation === 'OPEN').length,
+      estimatedTurnoverPct: 0,
+      maxPositions: 0,
+      notes: '',
+      targetCashPct: 0,
     },
+    targetAlloc: null,
+    currentAlloc: null,
   }
 }
 

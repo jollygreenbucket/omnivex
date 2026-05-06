@@ -76,3 +76,72 @@ CREATE INDEX IF NOT EXISTS idx_trades_ticker ON trades(ticker);
 CREATE INDEX IF NOT EXISTS idx_snapshots_date ON portfolio_snapshots(snapshot_date);
 CREATE INDEX IF NOT EXISTS idx_tier_perf_date ON tier_performance(snapshot_date);
 CREATE INDEX IF NOT EXISTS idx_holdings_ticker ON holdings(ticker);
+
+-- Allocator output: daily target book and rebalance plan
+CREATE TABLE IF NOT EXISTS portfolio_target_summary (
+    run_date                 DATE PRIMARY KEY,
+    mode                     VARCHAR(20) NOT NULL,
+    portfolio_base_value     DECIMAL(14,2),
+    current_cash             DECIMAL(14,2),
+    target_cash_pct          DECIMAL(8,4),
+    target_smart_core_pct    DECIMAL(8,4),
+    target_tactical_pct      DECIMAL(8,4),
+    target_speculative_pct   DECIMAL(8,4),
+    current_smart_core_pct   DECIMAL(8,4),
+    current_tactical_pct     DECIMAL(8,4),
+    current_speculative_pct  DECIMAL(8,4),
+    current_cash_pct         DECIMAL(8,4),
+    target_invested_pct      DECIMAL(8,4),
+    estimated_turnover_pct   DECIMAL(8,4),
+    max_positions            INTEGER,
+    notes                    TEXT,
+    created_at               TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS portfolio_targets (
+    id                       SERIAL PRIMARY KEY,
+    run_date                 DATE NOT NULL REFERENCES runs(run_date) ON DELETE CASCADE,
+    ticker                   VARCHAR(10) NOT NULL,
+    sector                   VARCHAR(100),
+    tier                     VARCHAR(20),
+    sleeve                   VARCHAR(20),
+    rank_in_sleeve           INTEGER,
+    action                   VARCHAR(20),
+    omnivex_score            DECIMAL(10,2),
+    signal_conf              DECIMAL(10,2),
+    suggested_weight_pct     DECIMAL(10,4),
+    target_weight_pct        DECIMAL(10,4) NOT NULL,
+    held                     BOOLEAN DEFAULT FALSE,
+    reason                   TEXT,
+    flags                    TEXT,
+    created_at               TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(run_date, ticker)
+);
+
+CREATE TABLE IF NOT EXISTS rebalance_recommendations (
+    id                       SERIAL PRIMARY KEY,
+    run_date                 DATE NOT NULL REFERENCES runs(run_date) ON DELETE CASCADE,
+    ticker                   VARCHAR(10) NOT NULL,
+    sector                   VARCHAR(100),
+    tier                     VARCHAR(20),
+    action                   VARCHAR(20),
+    recommendation           VARCHAR(20) NOT NULL,
+    recommendation_reason    TEXT,
+    omnivex_score            DECIMAL(10,2),
+    signal_conf              DECIMAL(10,2),
+    current_weight_pct       DECIMAL(10,4),
+    target_weight_pct        DECIMAL(10,4),
+    current_value            DECIMAL(14,2),
+    target_value             DECIMAL(14,2),
+    delta_weight_pct         DECIMAL(10,4),
+    delta_value              DECIMAL(14,2),
+    held                     BOOLEAN DEFAULT FALSE,
+    sleeve                   VARCHAR(20),
+    flags                    TEXT,
+    created_at               TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(run_date, ticker)
+);
+
+CREATE INDEX IF NOT EXISTS idx_target_summary_run_date ON portfolio_target_summary(run_date DESC);
+CREATE INDEX IF NOT EXISTS idx_portfolio_targets_run_date ON portfolio_targets(run_date DESC, target_weight_pct DESC);
+CREATE INDEX IF NOT EXISTS idx_rebalance_recommendations_run_date ON rebalance_recommendations(run_date DESC, recommendation);

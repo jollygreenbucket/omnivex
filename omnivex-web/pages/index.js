@@ -381,14 +381,17 @@ export default function Omnivex() {
   const totalCost = totalValue - totalPnl
   const totalPnlPct = totalCost > 0 ? (totalPnl / totalCost) * 100 : 0
 
-  const targetAlloc = {
+  const targetAlloc = rebalance?.targetAlloc || ({
     ALPHA: { SMART_CORE: 35, TACTICAL: 45, SPECULATIVE: 15, CASH: 5 },
     HEDGE: { SMART_CORE: 15, TACTICAL: 5,  SPECULATIVE: 0,  CASH: 80 },
     CORE:  { SMART_CORE: 52, TACTICAL: 25, SPECULATIVE: 7,  CASH: 16 },
-  }[mode] || {}
+  }[mode] || {})
 
-  const actualAlloc = {}
+  const actualAlloc = rebalance?.currentAlloc ? { ...rebalance.currentAlloc } : {}
   allocation.forEach(a => { actualAlloc[a.tier] = totalValue > 0 ? +((a.total_value / totalValue) * 100).toFixed(1) : 0 })
+  if (snap?.cash != null && !rebalance?.currentAlloc) {
+    actualAlloc.CASH = (Number(snap.cash || 0) / Math.max(Number(snap.total_value || 0), 1)) * 100
+  }
 
   const workflowRunning = ['queued', 'in_progress'].includes(runStatus?.status)
   const workflowSucceeded = runStatus?.status === 'completed' && runStatus?.conclusion === 'success'
@@ -791,17 +794,22 @@ export default function Omnivex() {
                     <div className="card" style={{ marginBottom: 24 }}>
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 12, marginBottom: 18 }}>
                         <StatCard label="Portfolio Base" value={fmtM(rebalance.totalPortfolioValue)} accent="var(--gold)" />
-                        <StatCard label="Cash" value={fmtM(rebalance.cash)} />
+                        <StatCard label="Cash / Target" value={`${fmtM(rebalance.cash)} / ${fmt(rebalance.summary?.targetCashPct, 1)}%`} />
                         <StatCard label="Open Targets" value={rebalance.summary?.openCount || 0} accent="var(--alpha)" />
                         <StatCard label="Adds / Trims" value={`${rebalance.summary?.buyCount || 0} / ${rebalance.summary?.trimCount || 0}`} accent={accent} />
-                        <StatCard label="Exits" value={rebalance.summary?.exitCount || 0} accent="var(--hedge)" />
+                        <StatCard label="Turnover / Max Pos" value={`${fmt(rebalance.summary?.estimatedTurnoverPct, 1)}% / ${rebalance.summary?.maxPositions || '—'}`} accent="var(--hedge)" />
                       </div>
+                      {rebalance.summary?.notes && (
+                        <div style={{ marginBottom: 14, color: 'var(--silver)', fontSize: 13 }}>
+                          {rebalance.summary.notes}
+                        </div>
+                      )}
                       <div style={{ overflowX: 'auto' }}>
                         <table className="pq-table">
                           <thead>
                             <tr>
                               <th>Ticker</th><th>Tier</th><th>Rec</th><th>Action</th>
-                              <th>Current Wt</th><th>Target Wt</th><th>Delta $</th><th>Score</th>
+                              <th>Current Wt</th><th>Target Wt</th><th>Delta $</th><th>Reason</th><th>Score</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -812,8 +820,9 @@ export default function Omnivex() {
                                 <td className={`c-${row.recommendation.toLowerCase()}`} style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700 }}>{row.recommendation}</td>
                                 <td className={`c-${(row.action || 'monitor').toLowerCase()}`} style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600 }}>{row.action || '—'}</td>
                                 <td style={{ fontFamily: 'var(--font-mono)' }}>{fmt(row.current_weight_pct, 2)}%</td>
-                                <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{fmt(row.suggested_weight_pct, 2)}%</td>
+                                <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{fmt(row.target_weight_pct ?? row.suggested_weight_pct, 2)}%</td>
                                 <td className={row.delta_value >= 0 ? 'c-pos' : 'c-neg'} style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{fmtM(row.delta_value)}</td>
+                                <td style={{ color: 'var(--silver-2)', fontSize: 12 }}>{row.recommendation_reason || row.reason || '—'}</td>
                                 <td>{row.omnivex_score == null ? '—' : <ScorePill value={row.omnivex_score} />}</td>
                               </tr>
                             ))}

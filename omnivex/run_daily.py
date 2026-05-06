@@ -28,6 +28,7 @@ from data.fetcher import (
 from data.finnhub import get_finnhub_data
 from core.scorer import score_ticker
 from core.mode_detector import detect_mode, get_target_allocation
+from portfolio.allocator import build_target_portfolio
 from output.reporter import (
     print_terminal_report, write_csv, write_html,
     assign_action, calc_suggested_weight,
@@ -154,6 +155,7 @@ def run(tickers: list = None, portfolio: dict = None, demo: bool = False,
 
     # Sort by score descending
     scored.sort(key=lambda x: x.get("omnivex_score", 0), reverse=True)
+    portfolio_plan = build_target_portfolio(mode_result, scored)
 
     # ── STEP 4: Output ──
     print("\n[4/4] Generating outputs...")
@@ -176,7 +178,7 @@ def run(tickers: list = None, portfolio: dict = None, demo: bool = False,
 
     # DB — add these lines
     from data.db_writer import write_run
-    write_run(mode_result, scored)
+    write_run(mode_result, scored, portfolio_plan=portfolio_plan)
 
     # Summary
     buys = [s for s in scored if s.get("action") in ("BUY", "ADD")]
@@ -192,6 +194,7 @@ def run(tickers: list = None, portfolio: dict = None, demo: bool = False,
     return {
         "mode": mode_result,
         "scored": scored,
+        "portfolio_plan": portfolio_plan,
         "csv_path": csv_path,
         "html_path": html_path,
     }

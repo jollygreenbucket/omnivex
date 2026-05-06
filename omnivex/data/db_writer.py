@@ -10,6 +10,8 @@ import os
 import json
 from datetime import date
 
+from portfolio.allocator import build_target_portfolio
+
 try:
     import psycopg2
     from psycopg2.extras import execute_values
@@ -62,7 +64,195 @@ def get_connection():
     return psycopg2.connect(url, sslmode="require")
 
 
-def write_run(mode_result: dict, scored: list, run_date: str = None) -> bool:
+def _load_portfolio_state(cur) -> tuple[list[dict], float | None, float]:
+    cur.execute("""
+        SELECT ticker, shares, avg_cost, current_price, market_value, tier
+        FROM holdings
+    """)
+    holdings = [
+        {
+            "ticker": row[0],
+            "shares": row[1],
+            "avg_cost": row[2],
+            "current_price": row[3],
+            "market_value": row[4],
+            "tier": row[5],
+        }
+        for row in cur.fetchall()
+    ]
+
+    cur.execute("""
+        SELECT total_value, cash
+        FROM portfolio_snapshots
+        ORDER BY snapshot_date DESC
+        LIMIT 1
+    """)
+    snapshot = cur.fetchone()
+    total_value = snapshot[0] if snapshot else None
+    cash = snapshot[1] if snapshot else 0.0
+    return holdings, total_value, cash
+
+
+def _write_portfolio_plan(cur, run_date: str, mode_result: dict, scored: list, portfolio_plan: dict | None = None):
+    holdings, total_value, cash = _load_portfolio_state(cur)
+    plan = portfolio_plan or build_target_portfolio(
+        mode_result,
+        scored,
+        holdings=holdings,
+        total_portfolio_value=total_value,
+        cash=cash,
+    )
+
+    cur.execute("DELETE FROM rebalance_recommendations WHERE run_date = %s", (run_date,))
+    cur.execute("DELETE FROM portfolio_targets WHERE run_date = %s", (run_date,))
+    cur.execute("DELETE FROM portfolio_target_summary WHERE run_date = %s", (run_date,))
+
+    cur.execute(
+        """
+        INSERT INTO portfolio_target_summary (
+            run_date, mode, portfolio_base_value, current_cash, target_cash_pct,
+            target_smart_core_pct, target_tactical_pct, target_speculative_pct,
+            current_smart_core_pct, current_tactical_pct, current_speculative_pct, current_cash_pct,
+            target_invested_pct, estimated_turnover_pct, max_positions, notes
+        ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        ON CONFLICT (run_date) DO UPDATE SET
+            mode = EXCLUDED.mode,
+            portfolio_base_value = EXCLUDED.portfolio_base_value,
+            current_cash = EXCLUDED.current_cash,
+            target_cash_pct = EXCLUDED.target_cash_pct,
+            target_smart_core_pct = EXCLUDED.target_smart_core_pct,
+            target_tactical_pct = EXCLUDED.target_tactical_pct,
+            target_speculative_pct = EXCLUDED.target_speculative_pct,
+            current_smart_core_pct = EXCLUDED.current_smart_core_pct,
+            current_tactical_pct = EXCLUDED.current_tactical_pct,
+            current_speculative_pct = EXCLUDED.current_speculative_pct,
+            current_cash_pct = EXCLUDED.current_cash_pct,
+            target_invested_pct = EXCLUDED.target_invested_pct,
+            estimated_turnover_pct = EXCLUDED.estimated_turnover_pct,
+            max_positions = EXCLUDED.max_positions,
+            notes = EXCLUDED.notes
+        """,
+        (
+            run_date,
+            plan.get("mode"),
+            plan.get("portfolio_base_value"),
+            plan.get("cash"),
+            plan.get("target_cash_pct"),
+            plan.get("target_sleeves", {}).get("SMART_CORE"),
+            plan.get("target_sleeves", {}).get("TACTICAL"),
+            plan.get("target_sleeves", {}).get("SPECULATIVE"),
+            plan.get("current_sleeves", {}).get("SMART_CORE"),
+            plan.get("current_sleeves", {}).get("TACTICAL"),
+            plan.get("current_sleeves", {}).get("SPECULATIVE"),
+            plan.get("current_sleeves", {}).get("CASH"),
+            plan.get("target_invested_pct"),
+            plan.get("estimated_turnover_pct"),
+            plan.get("max_positions"),
+            " | ".join(plan.get("notes", [])),
+        ),
+    )
+
+    target_rows = [
+        (
+            run_date,
+            row["ticker"],
+            row.get("sector"),
+            row.get("tier"),
+            row.get("sleeve"),
+            row.get("rank_in_sleeve"),
+            row.get("action"),
+            row.get("omnivex_score"),
+            row.get("signal_conf"),
+            row.get("suggested_weight_pct"),
+            row.get("target_weight_pct"),
+            row.get("held"),
+            row.get("reason"),
+            row.get("flags"),
+        )
+        for row in plan.get("rows", [])
+        if row.get("target_weight_pct", 0) > 0
+    ]
+    if target_rows:
+        execute_values(
+            cur,
+            """
+            INSERT INTO portfolio_targets (
+                run_date, ticker, sector, tier, sleeve, rank_in_sleeve, action,
+                omnivex_score, signal_conf, suggested_weight_pct, target_weight_pct,
+                held, reason, flags
+            ) VALUES %s
+            ON CONFLICT (run_date, ticker) DO UPDATE SET
+                sector = EXCLUDED.sector,
+                tier = EXCLUDED.tier,
+                sleeve = EXCLUDED.sleeve,
+                rank_in_sleeve = EXCLUDED.rank_in_sleeve,
+                action = EXCLUDED.action,
+                omnivex_score = EXCLUDED.omnivex_score,
+                signal_conf = EXCLUDED.signal_conf,
+                suggested_weight_pct = EXCLUDED.suggested_weight_pct,
+                target_weight_pct = EXCLUDED.target_weight_pct,
+                held = EXCLUDED.held,
+                reason = EXCLUDED.reason,
+                flags = EXCLUDED.flags
+            """,
+            target_rows,
+        )
+
+    recommendation_rows = [
+        (
+            run_date,
+            row["ticker"],
+            row.get("sector"),
+            row.get("tier"),
+            row.get("action"),
+            row.get("recommendation"),
+            row.get("recommendation_reason"),
+            row.get("omnivex_score"),
+            row.get("signal_conf"),
+            row.get("current_weight_pct"),
+            row.get("target_weight_pct"),
+            row.get("current_value"),
+            row.get("target_value"),
+            row.get("delta_weight_pct"),
+            row.get("delta_value"),
+            row.get("held"),
+            row.get("sleeve"),
+            row.get("flags"),
+        )
+        for row in plan.get("rows", [])
+    ]
+    if recommendation_rows:
+        execute_values(
+            cur,
+            """
+            INSERT INTO rebalance_recommendations (
+                run_date, ticker, sector, tier, action, recommendation, recommendation_reason,
+                omnivex_score, signal_conf, current_weight_pct, target_weight_pct,
+                current_value, target_value, delta_weight_pct, delta_value, held, sleeve, flags
+            ) VALUES %s
+            ON CONFLICT (run_date, ticker) DO UPDATE SET
+                sector = EXCLUDED.sector,
+                tier = EXCLUDED.tier,
+                action = EXCLUDED.action,
+                recommendation = EXCLUDED.recommendation,
+                recommendation_reason = EXCLUDED.recommendation_reason,
+                omnivex_score = EXCLUDED.omnivex_score,
+                signal_conf = EXCLUDED.signal_conf,
+                current_weight_pct = EXCLUDED.current_weight_pct,
+                target_weight_pct = EXCLUDED.target_weight_pct,
+                current_value = EXCLUDED.current_value,
+                target_value = EXCLUDED.target_value,
+                delta_weight_pct = EXCLUDED.delta_weight_pct,
+                delta_value = EXCLUDED.delta_value,
+                held = EXCLUDED.held,
+                sleeve = EXCLUDED.sleeve,
+                flags = EXCLUDED.flags
+            """,
+            recommendation_rows,
+        )
+
+
+def write_run(mode_result: dict, scored: list, run_date: str = None, portfolio_plan: dict = None) -> bool:
     """
     Write full daily run to Postgres.
     Returns True on success, False on failure (never crashes the scorer).
@@ -195,6 +385,11 @@ def write_run(mode_result: dict, scored: list, run_date: str = None) -> bool:
                 flags = EXCLUDED.flags,
                 forensic_flag = EXCLUDED.forensic_flag
         """, score_rows)
+
+        try:
+            _write_portfolio_plan(cur, today, mode_result, scored, portfolio_plan=portfolio_plan)
+        except Exception as portfolio_error:
+            print(f"  [DB] Portfolio plan write skipped: {portfolio_error}")
 
         conn.commit()
         cur.close()
