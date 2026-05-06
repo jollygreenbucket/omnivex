@@ -1,0 +1,57 @@
+name: Omnivex Replay Backtest
+
+on:
+  workflow_dispatch:
+    inputs:
+      start_date:
+        description: 'Optional lower bound (YYYY-MM-DD)'
+        required: false
+        default: ''
+      end_date:
+        description: 'Optional upper bound (YYYY-MM-DD)'
+        required: false
+        default: ''
+      top_n:
+        description: 'Number of BUY/ADD names per run'
+        required: false
+        default: '10'
+      weighting:
+        description: 'Weighting scheme (equal or score)'
+        required: false
+        default: 'equal'
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r omnivex/requirements.txt
+
+      - name: Run replay backtest
+        working-directory: ./omnivex
+        env:
+          POSTGRES_URL: ${{ secrets.POSTGRES_URL }}
+        run: |
+          python run_backtest.py \
+            --start-date "${{ github.event.inputs.start_date }}" \
+            --end-date "${{ github.event.inputs.end_date }}" \
+            --top-n "${{ github.event.inputs.top_n }}" \
+            --weighting "${{ github.event.inputs.weighting }}"
+
+      - name: Trigger Vercel redeploy
+        if: success()
+        run: |
+          curl -X POST "${{ secrets.VERCEL_DEPLOY_HOOK }}" \
+            -H "Content-Type: application/json" \
+            --fail --silent
+        continue-on-error: true

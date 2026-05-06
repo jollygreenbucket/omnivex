@@ -45,6 +45,10 @@ Vercel
 1. In Vercel → Storage → your database → Query tab
 2. Paste contents of `omnivex-web/scripts/schema.sql`
 3. Run it
+4. Paste contents of `omnivex-web/scripts/schema_portfolio.sql`
+5. Run it
+6. Paste contents of `omnivex-web/scripts/schema_backtests.sql`
+7. Run it
 
 ### 4. Add Environment Variables
 
@@ -90,7 +94,7 @@ Go to GitHub → Actions → Omnivex Daily Scorer → Run workflow
 
 ## Daily Operation
 
-The scorer runs automatically at **4:30 PM EST every weekday** via GitHub Actions.
+The scorer runs automatically at approximately **4:30 PM America/Chicago every weekday** via GitHub Actions.
 
 **Manual run:** GitHub → Actions → Omnivex Daily Scorer → Run workflow
 
@@ -100,6 +104,40 @@ The scorer runs automatically at **4:30 PM EST every weekday** via GitHub Action
 - refresh the latest Neon-backed data after a successful run
 
 **Dashboard:** Your Vercel URL (e.g. `omnivex.vercel.app`)
+
+---
+
+## Backtests
+
+Omnivex now includes a replay backtest foundation:
+
+- Python runner: `omnivex/run_backtest.py`
+- Web schema: `omnivex-web/scripts/schema_backtests.sql`
+- GitHub Actions workflow: `.github/workflows/backtest.yml`
+
+This first version replays historical Omnivex runs already stored in Neon and measures next-period performance of the top `BUY`/`ADD` names until the next recorded run.
+
+Run locally:
+
+```bash
+cd omnivex
+python run_backtest.py --top-n 10 --weighting equal
+```
+
+Run in GitHub Actions:
+
+- GitHub → Actions → `Omnivex Replay Backtest`
+- Fill optional inputs
+- Run workflow
+
+Results appear in the `Backtests` tab of the dashboard after the workflow completes and Vercel redeploys.
+
+Current limitation:
+- This replay engine uses archived Omnivex runs, not a full point-in-time historical fundamentals reconstruction. It is useful as a research and audit foundation, but not yet a final institutional-grade simulator.
+
+Planned upgrade path:
+- use `vectorbt` as the next research engine for broader parameter sweeps and portfolio experiments
+- keep the replay engine for “what did Omnivex actually signal at the time?” validation
 
 ---
 

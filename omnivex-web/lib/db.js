@@ -324,3 +324,41 @@ export async function getRebalancePlan() {
     },
   }
 }
+
+export async function getBacktestRuns(limit = 20) {
+  const rows = await sql`
+    SELECT *
+    FROM backtest_runs
+    ORDER BY created_at DESC
+    LIMIT ${limit}
+  `
+  return rows
+}
+
+export async function getBacktestDetail(id) {
+  const [run] = await sql`
+    SELECT *
+    FROM backtest_runs
+    WHERE id = ${id}::integer
+    LIMIT 1
+  `
+  if (!run) return null
+
+  const [equityCurve, positions] = await Promise.all([
+    sql`
+      SELECT *
+      FROM backtest_equity_curve
+      WHERE backtest_id = ${id}::integer
+      ORDER BY run_date ASC
+    `,
+    sql`
+      SELECT *
+      FROM backtest_positions
+      WHERE backtest_id = ${id}::integer
+      ORDER BY ABS(return_pct) DESC, run_date DESC
+      LIMIT 50
+    `,
+  ])
+
+  return { run, equityCurve, positions }
+}

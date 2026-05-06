@@ -163,6 +163,9 @@ export default function Omnivex() {
   const [tab, setTab] = useState('signals')
   const [dashData, setDashData] = useState(null)
   const [portData, setPortData] = useState(null)
+  const [backtestData, setBacktestData] = useState(null)
+  const [selectedBacktestId, setSelectedBacktestId] = useState(null)
+  const [backtestDetail, setBacktestDetail] = useState(null)
   const [runStatus, setRunStatus] = useState(null)
   const [triggeringRun, setTriggeringRun] = useState(false)
   const [runError, setRunError] = useState(null)
@@ -179,12 +182,14 @@ export default function Omnivex() {
   useEffect(() => setMounted(true), [])
 
   async function loadDashboardData() {
-    const [d, p] = await Promise.all([
+    const [d, p, b] = await Promise.all([
       fetch('/api/dashboard').then(r => r.json()),
       fetch('/api/portfolio').then(r => r.json()).catch(() => null),
+      fetch('/api/backtests').then(r => r.json()).catch(() => null),
     ])
     setDashData(d)
     setPortData(p)
+    setBacktestData(b)
   }
 
   async function loadRunStatus() {
@@ -211,6 +216,12 @@ export default function Omnivex() {
     setRunDetail(null)
     fetch(`/api/run?date=${selectedRunDate}`).then(r => r.json()).then(setRunDetail)
   }, [selectedRunDate])
+
+  useEffect(() => {
+    if (!selectedBacktestId) return
+    setBacktestDetail(null)
+    fetch(`/api/backtests?id=${selectedBacktestId}`).then(r => r.json()).then(setBacktestDetail)
+  }, [selectedBacktestId])
 
   useEffect(() => {
     if (!runStatus || !['queued', 'in_progress'].includes(runStatus.status)) return
@@ -356,7 +367,7 @@ export default function Omnivex() {
           <span className="label" style={{ letterSpacing: '.22em', fontSize: 9 }}>Paquette Capital</span>
         </div>
         <nav style={{ display: 'flex' }}>
-          {[['signals','Signals'],['portfolio','Portfolio'],['history','History']].map(([id,lbl]) => (
+          {[['signals','Signals'],['portfolio','Portfolio'],['history','History'],['backtests','Backtests']].map(([id,lbl]) => (
             <button key={id} className={`nav-tab ${tab===id?'active':''}`} onClick={() => setTab(id)}>{lbl}</button>
           ))}
         </nav>
@@ -939,6 +950,119 @@ export default function Omnivex() {
                 </div>
               )}
             </div>
+          </div>
+        )}
+
+        {/* ══ BACKTESTS TAB ══ */}
+        {tab === 'backtests' && (
+          <div>
+            <div className="card anim-1" style={{ marginBottom: 20 }}>
+              <div className="label" style={{ marginBottom: 12, fontSize: 11 }}>Backtest Foundation</div>
+              <div style={{ color: 'var(--silver)', fontSize: 14, lineHeight: 1.6 }}>
+                Omnivex now includes a replay backtest foundation in the Python repo. It replays recorded
+                historical Omnivex runs from Neon and measures the next-period performance of top BUY/ADD
+                names. This uses actual stored Omnivex signals, not reconstructed historical fundamentals.
+              </div>
+            </div>
+
+            <div className="card anim-2" style={{ padding: 0, overflow: 'hidden', marginBottom: 20 }}>
+              <div style={{ padding: '18px 20px', borderBottom: '1px solid var(--ink-3)', background: 'var(--ink-2)' }}>
+                <span className="label" style={{ fontSize: 11 }}>Recent Backtests</span>
+              </div>
+              <div style={{ overflowX: 'auto' }}>
+                <table className="pq-table">
+                  <thead>
+                    <tr>
+                      <th>ID</th><th>Strategy</th><th>Engine</th><th>Return</th><th>CAGR</th><th>Sharpe</th><th>Max DD</th><th>Created</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(backtestData?.runs || []).map(run => (
+                      <tr key={run.id} onClick={() => setSelectedBacktestId(run.id)}>
+                        <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 700 }}>{run.id}</td>
+                        <td><span style={{ fontWeight: 600 }}>{run.strategy_name}</span></td>
+                        <td style={{ fontFamily: 'var(--font-mono)', color: 'var(--silver)' }}>{run.engine}</td>
+                        <td className={(run.total_return_pct || 0) >= 0 ? 'c-pos' : 'c-neg'} style={{ fontFamily: 'var(--font-mono)', fontWeight: 700 }}>{fmt(run.total_return_pct, 2)}%</td>
+                        <td style={{ fontFamily: 'var(--font-mono)' }}>{fmt(run.cagr_pct, 2)}%</td>
+                        <td style={{ fontFamily: 'var(--font-mono)' }}>{fmt(run.sharpe, 2)}</td>
+                        <td className="c-neg" style={{ fontFamily: 'var(--font-mono)' }}>{fmt(run.max_drawdown_pct, 2)}%</td>
+                        <td style={{ fontFamily: 'var(--font-mono)', color: 'var(--silver)' }}>{fmtDate(run.created_at)}</td>
+                      </tr>
+                    ))}
+                    {!backtestData?.runs?.length && (
+                      <tr><td colSpan={8} style={{ color: 'var(--silver-2)', textAlign: 'center', padding: 40, fontSize: 14 }}>No backtests saved yet. Run `python run_backtest.py` after applying the backtest schema.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {selectedBacktestId && (
+              <div className="card anim-3">
+                {!backtestDetail?.run ? (
+                  <div className="label">Loading backtest detail...</div>
+                ) : (
+                  <>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+                      <div>
+                        <div className="label" style={{ marginBottom: 6, fontSize: 11 }}>Backtest Detail</div>
+                        <div style={{ fontFamily: 'var(--font-serif)', fontSize: 24, color: 'var(--gold)', fontWeight: 500 }}>
+                          {backtestDetail.run.strategy_name} #{backtestDetail.run.id}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => setSelectedBacktestId(null)}
+                        style={{ background: 'none', border: '1px solid var(--ink-4)', color: 'var(--silver-2)', borderRadius: 6, padding: '6px 10px', cursor: 'pointer' }}
+                      >
+                        Close
+                      </button>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 12, marginBottom: 18 }}>
+                      <StatCard label="Return" value={`${fmt(backtestDetail.run.total_return_pct, 2)}%`} accent="var(--alpha)" />
+                      <StatCard label="CAGR" value={`${fmt(backtestDetail.run.cagr_pct, 2)}%`} />
+                      <StatCard label="Sharpe" value={fmt(backtestDetail.run.sharpe, 2)} accent={accent} />
+                      <StatCard label="Volatility" value={`${fmt(backtestDetail.run.volatility_pct, 2)}%`} />
+                      <StatCard label="Max DD" value={`${fmt(backtestDetail.run.max_drawdown_pct, 2)}%`} accent="var(--hedge)" />
+                      <StatCard label="Periods" value={backtestDetail.run.periods} />
+                    </div>
+
+                    {mounted && backtestDetail.equityCurve?.length > 0 && (
+                      <div className="card" style={{ marginBottom: 20 }}>
+                        <div className="label" style={{ marginBottom: 18, fontSize: 11 }}>Equity Curve</div>
+                        <ResponsiveContainer width="100%" height={220}>
+                          <LineChart data={backtestDetail.equityCurve}>
+                            <XAxis dataKey="run_date" tickFormatter={fmtDate} tick={{ fill: '#6a7290', fontSize: 11, fontFamily: 'var(--font-mono)' }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+                            <YAxis tick={{ fill: '#6a7290', fontSize: 11, fontFamily: 'var(--font-mono)' }} axisLine={false} tickLine={false} width={42} />
+                            <Tooltip content={<ChartTip />} />
+                            <Line type="monotone" dataKey="equity" name="Omnivex" stroke={accent} strokeWidth={2.5} dot={false} />
+                            <Line type="monotone" dataKey="benchmark_equity" name="Benchmark" stroke="#404868" strokeWidth={1.5} strokeDasharray="5 4" dot={false} />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    )}
+
+                    <div style={{ overflowX: 'auto' }}>
+                      <table className="pq-table">
+                        <thead><tr><th>Ticker</th><th>Run</th><th>Tier</th><th>Score</th><th>Weight</th><th>Return</th></tr></thead>
+                        <tbody>
+                          {(backtestDetail.positions || []).slice(0, 25).map(pos => (
+                            <tr key={`${pos.id}-${pos.ticker}`}>
+                              <td><span style={{ fontWeight: 600 }}>{pos.ticker}</span></td>
+                              <td style={{ fontFamily: 'var(--font-mono)' }}>{fmtDate(pos.run_date)}</td>
+                              <td><TierPill tier={pos.tier} /></td>
+                              <td><ScorePill value={pos.omnivex_score} /></td>
+                              <td style={{ fontFamily: 'var(--font-mono)' }}>{fmt(pos.suggested_weight_pct, 2)}%</td>
+                              <td className={(pos.return_pct || 0) >= 0 ? 'c-pos' : 'c-neg'} style={{ fontFamily: 'var(--font-mono)', fontWeight: 700 }}>{fmt(pos.return_pct, 2)}%</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         )}
       </main>

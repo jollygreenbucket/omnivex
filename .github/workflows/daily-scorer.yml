@@ -2,8 +2,10 @@ name: Omnivex Daily Scorer
 
 on:
   schedule:
-    # Run at 4:30 PM EST (21:30 UTC) Monday–Friday — 30 min after market close
-    - cron: '30 21 * * 1-5'
+    # Approximate 4:30 PM America/Chicago on weekdays.
+    # GitHub Actions cron is UTC-only, so this uses split schedules for standard vs daylight time.
+    - cron: '30 22 * 1-3,11-12 1-5'
+    - cron: '30 21 * 4-10 1-5'
   workflow_dispatch:
     # Allow manual trigger from GitHub Actions tab
     inputs:
