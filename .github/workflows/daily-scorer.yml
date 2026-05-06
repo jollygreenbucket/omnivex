@@ -67,11 +67,13 @@ jobs:
           SCHWAB_TOKEN_PATH:   /tmp/schwab_token.json
         run: |
           echo "${{ secrets.SCHWAB_TOKEN_JSON }}" > /tmp/schwab_token.json
-          python -c "
-from dotenv import load_dotenv; load_dotenv()
-from data.schwab_sync import run_full_sync
-run_full_sync()
-"
+          python - <<'PY'
+          from dotenv import load_dotenv
+          from data.schwab_sync import run_full_sync
+
+          load_dotenv()
+          run_full_sync()
+          PY
         continue-on-error: true
 
       - name: Trigger Vercel redeploy
