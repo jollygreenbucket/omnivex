@@ -173,6 +173,8 @@ export default function Omnivex() {
   const [sortCol, setSortCol] = useState('omnivex_score')
   const [focusTicker, setFocusTicker] = useState(null)
   const [tickerHist, setTickerHist] = useState(null)
+  const [selectedRunDate, setSelectedRunDate] = useState(null)
+  const [runDetail, setRunDetail] = useState(null)
 
   useEffect(() => setMounted(true), [])
 
@@ -203,6 +205,12 @@ export default function Omnivex() {
     setTickerHist(null)
     fetch(`/api/ticker?ticker=${focusTicker}`).then(r => r.json()).then(setTickerHist)
   }, [focusTicker])
+
+  useEffect(() => {
+    if (!selectedRunDate) return
+    setRunDetail(null)
+    fetch(`/api/run?date=${selectedRunDate}`).then(r => r.json()).then(setRunDetail)
+  }, [selectedRunDate])
 
   useEffect(() => {
     if (!runStatus || !['queued', 'in_progress'].includes(runStatus.status)) return
@@ -297,6 +305,7 @@ export default function Omnivex() {
   const trades = portData?.trades || []
   const allocation = portData?.allocation || []
   const snap = portData?.snapshot
+  const rebalance = portData?.rebalance
 
   const totalValue = holdings.reduce((s, h) => s + (h.market_value || 0), 0)
   const totalPnl = holdings.reduce((s, h) => s + (h.unrealized_pnl || 0), 0)
@@ -694,6 +703,45 @@ export default function Omnivex() {
                   </div>
                 </div>
 
+                {rebalance?.rows?.length > 0 && (
+                  <>
+                    <SectionLabel>Rebalance Plan</SectionLabel>
+                    <div className="card" style={{ marginBottom: 24 }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 12, marginBottom: 18 }}>
+                        <StatCard label="Portfolio Base" value={fmtM(rebalance.totalPortfolioValue)} accent="var(--gold)" />
+                        <StatCard label="Cash" value={fmtM(rebalance.cash)} />
+                        <StatCard label="Open Targets" value={rebalance.summary?.openCount || 0} accent="var(--alpha)" />
+                        <StatCard label="Adds / Trims" value={`${rebalance.summary?.buyCount || 0} / ${rebalance.summary?.trimCount || 0}`} accent={accent} />
+                        <StatCard label="Exits" value={rebalance.summary?.exitCount || 0} accent="var(--hedge)" />
+                      </div>
+                      <div style={{ overflowX: 'auto' }}>
+                        <table className="pq-table">
+                          <thead>
+                            <tr>
+                              <th>Ticker</th><th>Tier</th><th>Rec</th><th>Action</th>
+                              <th>Current Wt</th><th>Target Wt</th><th>Delta $</th><th>Score</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {rebalance.rows.slice(0, 15).map(row => (
+                              <tr key={row.ticker} onClick={() => setFocusTicker(row.ticker)}>
+                                <td><span style={{ fontWeight: 600 }}>{row.ticker}</span></td>
+                                <td><TierPill tier={row.tier} /></td>
+                                <td className={`c-${row.recommendation.toLowerCase()}`} style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700 }}>{row.recommendation}</td>
+                                <td className={`c-${(row.action || 'monitor').toLowerCase()}`} style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600 }}>{row.action || '—'}</td>
+                                <td style={{ fontFamily: 'var(--font-mono)' }}>{fmt(row.current_weight_pct, 2)}%</td>
+                                <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{fmt(row.suggested_weight_pct, 2)}%</td>
+                                <td className={row.delta_value >= 0 ? 'c-pos' : 'c-neg'} style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{fmtM(row.delta_value)}</td>
+                                <td>{row.omnivex_score == null ? '—' : <ScorePill value={row.omnivex_score} />}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </>
+                )}
+
                 <SectionLabel>Current Holdings</SectionLabel>
                 <div className="card" style={{ padding: 0, overflow: 'hidden', marginBottom: 24 }}>
                   <div style={{ overflowX: 'auto' }}>
@@ -805,7 +853,7 @@ export default function Omnivex() {
                     <thead><tr><th>Date</th><th>Mode</th><th>VIX</th><th>SPY</th><th>Tickers</th></tr></thead>
                     <tbody>
                       {(runHistory||[]).map(r => (
-                        <tr key={r.run_date}>
+                        <tr key={r.run_date} onClick={() => setSelectedRunDate(r.run_date)}>
                           <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 500 }}>{fmtDate(r.run_date)}</td>
                           <td><span className={`badge ${modeCls(r.mode)}`} style={{ fontSize: 9 }}>{modeLabel(r.mode)}</span></td>
                           <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 500 }}>{fmt(r.vix)}</td>
@@ -819,6 +867,77 @@ export default function Omnivex() {
                   </table>
                 </div>
               </div>
+
+              {selectedRunDate && (
+                <div className="card anim-3" style={{ marginTop: 16 }}>
+                  {!runDetail?.run ? (
+                    <div className="label">Loading run detail...</div>
+                  ) : (
+                    <>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+                        <div>
+                          <div className="label" style={{ marginBottom: 6, fontSize: 11 }}>Run Detail</div>
+                          <div style={{ fontFamily: 'var(--font-serif)', fontSize: 24, color: 'var(--gold)', fontWeight: 500 }}>
+                            {fmtDate(runDetail.run.run_date)}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => setSelectedRunDate(null)}
+                          style={{ background: 'none', border: '1px solid var(--ink-4)', color: 'var(--silver-2)', borderRadius: 6, padding: '6px 10px', cursor: 'pointer' }}
+                        >
+                          Close
+                        </button>
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 12, marginBottom: 18 }}>
+                        <StatCard label="Mode" value={modeLabel(runDetail.run.mode)} accent={modeAccent(runDetail.run.mode)} />
+                        <StatCard label="VIX" value={fmt(runDetail.run.vix)} />
+                        <StatCard label="SPY" value={`${(runDetail.run.spy_daily_pct||0)>=0?'+':''}${fmt(runDetail.run.spy_daily_pct)}%`} accent={(runDetail.run.spy_daily_pct||0)>=0?'var(--alpha)':'var(--hedge)'} />
+                        <StatCard label="Scored" value={runDetail.run.tickers_scored} />
+                        <StatCard label="Buys / Reduces" value={`${runDetail.run.tickers_buy || 0} / ${runDetail.run.tickers_reduce || 0}`} />
+                        <StatCard label="Flags" value={runDetail.run.tickers_flagged || 0} accent="var(--gold)" />
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                        <div>
+                          <div className="label" style={{ marginBottom: 10, fontSize: 11 }}>Top Actions</div>
+                          <table className="pq-table">
+                            <thead><tr><th>Ticker</th><th>Action</th><th>Score</th><th>Tier</th></tr></thead>
+                            <tbody>
+                              {(runDetail.scores || []).filter(s => ['BUY','ADD','REDUCE','REMOVE','ROTATE'].includes(s.action)).slice(0, 12).map(s => (
+                                <tr key={s.ticker} onClick={() => setFocusTicker(s.ticker)}>
+                                  <td><span style={{ fontWeight: 600 }}>{s.ticker}</span></td>
+                                  <td className={`c-${(s.action || 'monitor').toLowerCase()}`} style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700 }}>{s.action}</td>
+                                  <td><ScorePill value={s.omnivex_score} /></td>
+                                  <td><TierPill tier={s.tier} /></td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                        <div>
+                          <div className="label" style={{ marginBottom: 10, fontSize: 11 }}>Largest Score Changes</div>
+                          <table className="pq-table">
+                            <thead><tr><th>Ticker</th><th>Delta</th><th>Action</th><th>Score</th></tr></thead>
+                            <tbody>
+                              {(runDetail.movers || []).slice(0, 12).map(s => (
+                                <tr key={s.ticker} onClick={() => setFocusTicker(s.ticker)}>
+                                  <td><span style={{ fontWeight: 600 }}>{s.ticker}</span></td>
+                                  <td className={(s.score_delta || 0) >= 0 ? 'c-pos' : 'c-neg'} style={{ fontFamily: 'var(--font-mono)', fontWeight: 700 }}>
+                                    {(s.score_delta || 0) >= 0 ? '+' : ''}{fmt(s.score_delta, 2)}
+                                  </td>
+                                  <td className={`c-${(s.action || 'monitor').toLowerCase()}`} style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700 }}>{s.action || '—'}</td>
+                                  <td><ScorePill value={s.omnivex_score} /></td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         )}

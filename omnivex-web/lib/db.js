@@ -37,6 +37,59 @@ export async function getRunHistory(days = 90) {
   return rows
 }
 
+export async function getRunDetail(runDate) {
+  const [run] = await sql`
+    SELECT * FROM runs WHERE run_date = ${runDate}::date LIMIT 1
+  `
+
+  if (!run) return null
+
+  const scores = await sql`
+    SELECT *
+    FROM scores
+    WHERE run_date = ${runDate}::date
+    ORDER BY omnivex_score DESC, ticker ASC
+  `
+
+  const previousRuns = await sql`
+    SELECT run_date
+    FROM runs
+    WHERE run_date < ${runDate}::date
+    ORDER BY run_date DESC
+    LIMIT 1
+  `
+  const previousRunDate = previousRuns[0]?.run_date || null
+
+  let movers = []
+  if (previousRunDate) {
+    movers = await sql`
+      SELECT curr.ticker,
+             curr.omnivex_score,
+             curr.action,
+             curr.tier,
+             curr.flags,
+             curr.forensic_flag,
+             curr.signal_conf,
+             curr.suggested_weight_pct,
+             curr.omnivex_score - COALESCE(prev.omnivex_score, curr.omnivex_score) AS score_delta
+      FROM scores curr
+      LEFT JOIN scores prev
+        ON prev.ticker = curr.ticker
+       AND prev.run_date = ${previousRunDate}::date
+      WHERE curr.run_date = ${runDate}::date
+      ORDER BY ABS(curr.omnivex_score - COALESCE(prev.omnivex_score, curr.omnivex_score)) DESC
+      LIMIT 15
+    `
+  }
+
+  return {
+    run,
+    scores,
+    previousRunDate,
+    movers,
+  }
+}
+
 export async function getTickerHistory(ticker, days = 60) {
   const rows = await sql`
     SELECT s.run_date, s.omnivex_score, s.qtech, s.psos, s.signal_conf,
@@ -157,4 +210,117 @@ export async function getPerformanceVsSpy(days = 90) {
     ORDER BY snapshot_date ASC
   `
   return rows
+}
+
+export async function getRebalancePlan() {
+  const [run, holdings, snapshot, scores] = await Promise.all([
+    getLatestRun(),
+    getHoldings(),
+    getLatestSnapshot(),
+    getLatestScores(),
+  ])
+
+  const totalHoldingsValue = holdings.reduce((sum, holding) => sum + Number(holding.market_value || 0), 0)
+  const totalPortfolioValue = Number(snapshot?.total_value || 0) || totalHoldingsValue
+  const cash = Number(snapshot?.cash || 0)
+
+  if (!run || totalPortfolioValue <= 0) {
+    return {
+      mode: run?.mode || null,
+      totalPortfolioValue,
+      cash,
+      rows: [],
+      summary: {
+        buyCount: 0,
+        trimCount: 0,
+        exitCount: 0,
+        openCount: 0,
+      },
+    }
+  }
+
+  const holdingsByTicker = new Map(holdings.map(holding => [holding.ticker, holding]))
+  const scoreTickers = new Set(scores.map(score => score.ticker))
+  const includedScores = scores.filter(score => Number(score.suggested_weight_pct || 0) > 0 || holdingsByTicker.has(score.ticker))
+
+  const planRows = includedScores.map(score => {
+    const holding = holdingsByTicker.get(score.ticker)
+    const currentValue = Number(holding?.market_value || 0)
+    const currentWeightPct = totalPortfolioValue > 0 ? (currentValue / totalPortfolioValue) * 100 : 0
+    const targetWeightPct = Number(score.suggested_weight_pct || 0)
+    const targetValue = totalPortfolioValue * (targetWeightPct / 100)
+    const deltaValue = targetValue - currentValue
+    const threshold = Math.max(totalPortfolioValue * 0.0025, 100)
+
+    let recommendation = 'HOLD'
+    if (!holding && targetWeightPct > 0) {
+      recommendation = 'OPEN'
+    } else if (holding && targetWeightPct <= 0.01) {
+      recommendation = 'EXIT'
+    } else if (deltaValue > threshold) {
+      recommendation = 'ADD'
+    } else if (deltaValue < -threshold) {
+      recommendation = 'TRIM'
+    }
+
+    return {
+      ticker: score.ticker,
+      sector: score.sector,
+      tier: score.tier,
+      action: score.action,
+      omnivex_score: Number(score.omnivex_score || 0),
+      signal_conf: Number(score.signal_conf || 0),
+      suggested_weight_pct: targetWeightPct,
+      current_weight_pct: Number(currentWeightPct.toFixed(2)),
+      current_value: currentValue,
+      target_value: Number(targetValue.toFixed(2)),
+      delta_value: Number(deltaValue.toFixed(2)),
+      recommendation,
+      shares: Number(holding?.shares || 0),
+      current_price: Number(holding?.current_price || 0),
+      market_value: currentValue,
+      flags: score.flags,
+      held: Boolean(holding),
+    }
+  })
+
+  for (const holding of holdings) {
+    if (scoreTickers.has(holding.ticker)) continue
+    const currentValue = Number(holding.market_value || 0)
+    const currentWeightPct = totalPortfolioValue > 0 ? (currentValue / totalPortfolioValue) * 100 : 0
+    planRows.push({
+      ticker: holding.ticker,
+      sector: null,
+      tier: holding.tier || 'UNASSIGNED',
+      action: 'REVIEW',
+      omnivex_score: null,
+      signal_conf: null,
+      suggested_weight_pct: 0,
+      current_weight_pct: Number(currentWeightPct.toFixed(2)),
+      current_value: currentValue,
+      target_value: 0,
+      delta_value: Number((-currentValue).toFixed(2)),
+      recommendation: 'EXIT',
+      shares: Number(holding.shares || 0),
+      current_price: Number(holding.current_price || 0),
+      market_value: currentValue,
+      flags: null,
+      held: true,
+    })
+  }
+
+  planRows.sort((a, b) => Math.abs(b.delta_value) - Math.abs(a.delta_value))
+
+  return {
+    mode: run.mode,
+    totalPortfolioValue,
+    cash,
+    rows: planRows,
+    summary: {
+      buyCount: planRows.filter(row => row.recommendation === 'ADD').length,
+      trimCount: planRows.filter(row => row.recommendation === 'TRIM').length,
+      exitCount: planRows.filter(row => row.recommendation === 'EXIT').length,
+      openCount: planRows.filter(row => row.recommendation === 'OPEN').length,
+    },
+  }
 }
