@@ -167,32 +167,33 @@ SIGNAL_CONF_WEIGHTS = {
 # PSOS SUBCOMPONENT WEIGHTS
 # ─────────────────────────────────────────────
 PSOS_PROBABILITY_WEIGHTS = {
-    "analyst_direction": 0.30,
-    "price_trend": 0.25,
-    "volume_confirmation": 0.20,
-    "earnings_proximity": 0.15,
-    "options_flow": 0.10,
+    "analyst_direction": 0.28,
+    "price_trend": 0.22,
+    "volume_confirmation": 0.18,
+    "earnings_proximity": 0.14,
+    "catalyst_intensity": 0.18,
 }
 
 PSOS_SEVERITY_WEIGHTS = {
-    "atr_percentile": 0.40,
-    "post_earnings_move": 0.30,
-    "short_interest_pct": 0.20,
-    "gap_frequency": 0.10,
+    "atr_percentile": 0.28,
+    "post_earnings_move": 0.26,
+    "short_interest_pct": 0.18,
+    "gap_frequency": 0.16,
+    "beta_risk": 0.12,
 }
 
 PSOS_OPPORTUNITY_WEIGHTS = {
-    "upside_downside_ratio": 0.35,
-    "catalyst_strength": 0.25,
-    "tam_narrative": 0.20,
-    "valuation_rerate": 0.20,
+    "upside_downside_ratio": 0.34,
+    "valuation_rerate": 0.26,
+    "revenue_growth_support": 0.20,
+    "fcf_quality": 0.20,
 }
 
 PSOS_CLARITY_WEIGHTS = {
-    "multiframe_trend": 0.40,
-    "breakout_cleanliness": 0.30,
-    "relative_strength": 0.20,
-    "intraday_noise_penalty": 0.10,
+    "multiframe_trend": 0.34,
+    "breakout_cleanliness": 0.24,
+    "relative_strength": 0.27,
+    "volatility_compression": 0.15,
 }
 
 # ─────────────────────────────────────────────

@@ -52,7 +52,7 @@ def score_ticker(data: dict, market_ctx: dict, spy_momentum: dict,
     result["qtech_detail"] = qtech_detail
 
     # ── PSOS ──
-    psos_detail = calc_psos(data, market_ctx, analyst_events or [])
+    psos_detail = calc_psos(data, market_ctx, spy_momentum, analyst_events or [])
     result["psos_raw"] = psos_detail["psos_raw"]
     result["psos"] = psos_detail["psos_normalized"]
     result["psos_detail"] = psos_detail
@@ -260,33 +260,52 @@ def calc_qtech(data: dict) -> dict:
 # PSOS SCORE
 # ─────────────────────────────────────────────
 
-def calc_psos(data: dict, market_ctx: dict, analyst_events: list) -> dict:
+def calc_psos(data: dict, market_ctx: dict, spy_momentum: dict, analyst_events: list) -> dict:
     """
-    PSOS_raw = P × S × O × C (each 1–10)
-    PSOS = (PSOS_raw / 10000) × 100
+    PSOS v2:
+      - Removes fake neutral placeholders
+      - Scores only known fields and renormalizes weights
+      - Uses free Yahoo/Finnhub-derived catalyst, opportunity, and clarity inputs
     """
     # ── Probability (1–10) ──
     p_components = {}
     analyst_score = _analyst_direction_score(analyst_events)
     p_components["analyst_direction"] = _scale_to_10(analyst_score, 0, 100)
 
-    rsi = data.get("rsi", 50)
-    trend_score = 10 if (data.get("above_50dma") and data.get("above_200dma")) else \
-                  6 if data.get("above_200dma") else 3
-    p_components["price_trend"] = trend_score
+    price_trend = 2.5
+    if data.get("above_200dma"):
+        price_trend += 2.5
+    if data.get("above_50dma"):
+        price_trend += 2.5
+    if data.get("ma_50") is not None and data.get("ma_200") is not None and data["ma_50"] > data["ma_200"]:
+        price_trend += 2.0
+    if data.get("return_1m") is not None and data["return_1m"] > 0:
+        price_trend += 0.5
+    p_components["price_trend"] = round(min(10, max(1, price_trend)), 2)
 
     vol_ratio = data.get("volume_ratio", 1.0) or 1.0
-    p_components["volume_confirmation"] = min(10, max(1, int(vol_ratio * 5)))
+    p_components["volume_confirmation"] = round(min(10, max(1, 2 + (vol_ratio * 3))), 2)
 
     earnings_days = data.get("earnings_proximity_days")
-    if earnings_days is not None and 0 <= earnings_days <= 14:
-        p_components["earnings_proximity"] = 8
-    elif earnings_days is not None and 15 <= earnings_days <= 30:
-        p_components["earnings_proximity"] = 6
-    else:
-        p_components["earnings_proximity"] = 4
+    if earnings_days is not None:
+        if 0 <= earnings_days <= 7:
+            p_components["earnings_proximity"] = 9.5
+        elif 8 <= earnings_days <= 14:
+            p_components["earnings_proximity"] = 8.0
+        elif 15 <= earnings_days <= 30:
+            p_components["earnings_proximity"] = 6.0
+        elif 31 <= earnings_days <= 60:
+            p_components["earnings_proximity"] = 4.0
+        else:
+            p_components["earnings_proximity"] = 2.5
 
-    p_components["options_flow"] = 5  # neutral default — no free options flow data
+    analyst_event_count = len(analyst_events or [])
+    catalyst_intensity = min(10, 2 + (analyst_event_count * 2))
+    if earnings_days is not None and 0 <= earnings_days <= 30:
+        catalyst_intensity += 2
+    if any(e.get("event_type") in ("upgrade", "initiation_buy") for e in analyst_events or []):
+        catalyst_intensity += 1
+    p_components["catalyst_intensity"] = round(min(10, catalyst_intensity), 2)
 
     P = _weighted_component(p_components, PSOS_PROBABILITY_WEIGHTS)
 
@@ -295,13 +314,17 @@ def calc_psos(data: dict, market_ctx: dict, analyst_events: list) -> dict:
     atr = data.get("atr", 1.0) or 1.0
     price = data.get("price", 100) or 100
     atr_pct = (atr / price) * 100
-    s_components["atr_percentile"] = min(10, max(1, int(atr_pct * 2)))
+    s_components["atr_percentile"] = round(min(10, max(1, 1 + (atr_pct * 2.4))), 2)
 
     earnings_score = data.get("post_earnings_move_score", 50)
-    s_components["post_earnings_move"] = max(1, min(10, earnings_score / 10))
+    s_components["post_earnings_move"] = round(max(1, min(10, earnings_score / 10)), 2)
     short_pct = data.get("short_percent", 0.05) or 0.05
-    s_components["short_interest_pct"] = min(10, max(1, int(short_pct * 50)))
-    s_components["gap_frequency"] = 5  # neutral default
+    s_components["short_interest_pct"] = round(min(10, max(1, 1 + short_pct * 60)), 2)
+    if data.get("gap_count_20d") is not None:
+        s_components["gap_frequency"] = round(min(10, max(1, 1 + data["gap_count_20d"] * 1.5)), 2)
+    beta = data.get("beta")
+    if beta is not None:
+        s_components["beta_risk"] = round(min(10, max(1, 2 + (beta * 2.5))), 2)
 
     S = _weighted_component(s_components, PSOS_SEVERITY_WEIGHTS)
 
@@ -311,13 +334,34 @@ def calc_psos(data: dict, market_ctx: dict, analyst_events: list) -> dict:
     low_52 = data.get("52w_low")
     if high_52 and low_52 and price:
         range_pos = (price - low_52) / (high_52 - low_52) if high_52 != low_52 else 0.5
-        o_components["upside_downside_ratio"] = max(1, min(10, int((1 - range_pos) * 10)))
-    else:
-        o_components["upside_downside_ratio"] = 5
+        o_components["upside_downside_ratio"] = round(max(1, min(10, 1 + (1 - range_pos) * 9)), 2)
 
-    o_components["catalyst_strength"] = 5
-    o_components["tam_narrative"] = 5
-    o_components["valuation_rerate"] = 5
+    peg = data.get("peg_ratio")
+    pe = data.get("pe_ratio")
+    sector = data.get("sector", "default")
+    thresholds = SECTOR_THRESHOLDS.get(sector, SECTOR_THRESHOLDS["default"])
+    if peg is not None and peg > 0:
+        valuation_score = 10 if peg <= 1 else 8 if peg <= 1.5 else 6 if peg <= 2 else 4 if peg <= 3 else 2
+        o_components["valuation_rerate"] = float(valuation_score)
+    elif pe is not None:
+        pe_max = thresholds.get("pe_max", 30)
+        relative_pe = pe / pe_max if pe_max else 1
+        o_components["valuation_rerate"] = round(max(1, min(10, 10 - ((relative_pe - 0.5) * 5))), 2)
+
+    rev_growth = data.get("revenue_growth")
+    if rev_growth is not None:
+        rev_pct = rev_growth * 100 if abs(rev_growth) < 5 else rev_growth
+        o_components["revenue_growth_support"] = round(max(1, min(10, 4 + rev_pct / 4)), 2)
+
+    fcf = data.get("fcf")
+    fcf_yield = data.get("fcf_yield")
+    if fcf is not None or fcf_yield is not None:
+        fcf_quality = 4.0
+        if fcf is not None and fcf > 0:
+            fcf_quality += 3.0
+        if fcf_yield is not None:
+            fcf_quality += min(3.0, max(0.0, fcf_yield * 50))
+        o_components["fcf_quality"] = round(min(10, max(1, fcf_quality)), 2)
 
     O = _weighted_component(o_components, PSOS_OPPORTUNITY_WEIGHTS)
 
@@ -328,11 +372,31 @@ def calc_psos(data: dict, market_ctx: dict, analyst_events: list) -> dict:
     c_components["multiframe_trend"] = 9 if above_both else 6 if above_one else 3
 
     rsi_val = data.get("rsi", 50) or 50
-    breakout_clean = 1 if rsi_val > 70 else 0
-    c_components["breakout_cleanliness"] = 8 if breakout_clean else 5
+    vol_ratio = data.get("volume_ratio") or 1.0
+    if 58 <= rsi_val <= 72:
+        breakout_score = 7.0
+    elif 50 <= rsi_val < 58 or 72 < rsi_val <= 78:
+        breakout_score = 5.5
+    else:
+        breakout_score = 4.0
+    if vol_ratio >= 1.3:
+        breakout_score += 1.0
+    c_components["breakout_cleanliness"] = round(min(10, max(1, breakout_score)), 2)
 
-    c_components["relative_strength"] = 5  # computed vs SPY in signal confidence
-    c_components["intraday_noise_penalty"] = 7  # default clean
+    rel_strength = data.get("rel_strength_vs_spy")
+    if rel_strength is None:
+        ret_3m = data.get("return_3m")
+        ret_6m = data.get("return_6m")
+        spy_3m = spy_momentum.get("spy_3m") or 0
+        spy_6m = spy_momentum.get("spy_6m") or 0
+        if ret_3m is not None and ret_6m is not None:
+            rel_strength = ((ret_3m - spy_3m) + (ret_6m - spy_6m)) / 2
+    if rel_strength is not None:
+        c_components["relative_strength"] = round(max(1, min(10, 5 + (rel_strength / 8))), 2)
+
+    atr_compressed = data.get("atr_20d_low")
+    if atr_compressed is not None:
+        c_components["volatility_compression"] = 8.5 if atr_compressed else 4.5
 
     C = _weighted_component(c_components, PSOS_CLARITY_WEIGHTS)
 
@@ -604,8 +668,9 @@ def _weighted_component(components: dict, weights: dict) -> float:
     total = 0.0
     weight_sum = 0.0
     for key, weight in weights.items():
-        if key in components:
-            total += weight * components[key]
+        value = components.get(key)
+        if value is not None:
+            total += weight * value
             weight_sum += weight
     if weight_sum == 0:
         return 5.0
@@ -635,19 +700,27 @@ def _generate_psos_scenarios(p_components: dict, s_components: dict,
         ("p", "analyst_direction"):   "Analyst upgrade momentum building",
         ("p", "earnings_proximity"):  "Earnings catalyst within 30 days",
         ("p", "volume_confirmation"): "Volume expansion confirming move",
+        ("p", "catalyst_intensity"):  "Catalyst stack building across events",
         ("o", "upside_downside_ratio"): "Price near 52W low — asymmetric upside",
+        ("o", "valuation_rerate"):    "Valuation leaves room for rerating",
+        ("o", "revenue_growth_support"): "Revenue growth supporting opportunity set",
         ("c", "multiframe_trend"):    "Trend confirmed above both 50/200 DMA",
-        ("c", "breakout_cleanliness"): "RSI breakout — clean technical setup",
+        ("c", "breakout_cleanliness"): "Breakout setup remains technically clean",
+        ("c", "relative_strength"):   "Relative strength vs SPY supporting move",
     }
     BEAR_MAP = {
         ("s", "short_interest_pct"):  "High short interest — squeeze or bearish thesis",
         ("s", "atr_percentile"):      "Elevated ATR — high gap/swing risk",
+        ("s", "gap_frequency"):       "Recent gap frequency raising event risk",
+        ("s", "beta_risk"):           "High beta amplifying move severity",
     }
     BEAR_LOW_MAP = {
         # These are bearish when their score is LOW (<=3)
         ("p", "analyst_direction"):     "Analyst downgrades — negative sentiment shift",
         ("o", "upside_downside_ratio"): "Price near 52W high — limited upside",
+        ("o", "valuation_rerate"):      "Valuation stretched vs opportunity set",
         ("c", "multiframe_trend"):      "Below both MAs — downtrend active",
+        ("c", "relative_strength"):     "Relative strength vs SPY deteriorating",
     }
 
     all_scores = {

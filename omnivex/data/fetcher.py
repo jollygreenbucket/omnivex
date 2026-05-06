@@ -76,8 +76,12 @@ def get_ticker_data(ticker: str, period: str = "1y") -> dict:
         ) if avg_vol and avg_vol > 0 else None
 
         # Momentum — 3M and 6M relative vs SPY
+        result["return_1m"] = _period_return(close, 21)
         result["return_3m"] = _period_return(close, 63)
         result["return_6m"] = _period_return(close, 126)
+
+        # Recent gap activity — proxy for event severity / technical noisiness
+        result["gap_count_20d"] = _gap_count(hist, 20)
 
         # ── Fundamentals (from info) ──
         result["market_cap"] = info.get("marketCap")
@@ -388,6 +392,15 @@ def _period_return(close: pd.Series, days: int) -> float | None:
     if len(close) < days:
         return None
     return round((close.iloc[-1] / close.iloc[-days] - 1) * 100, 2)
+
+
+def _gap_count(hist: pd.DataFrame, days: int = 20, gap_threshold: float = 0.02) -> int | None:
+    if len(hist) < days + 1:
+        return None
+    recent = hist.tail(days + 1).copy()
+    prev_close = recent["Close"].shift(1)
+    gap_pct = ((recent["Open"] - prev_close) / prev_close).abs()
+    return int((gap_pct >= gap_threshold).sum())
 
 
 def _get_earnings_date(ticker_obj) -> str | None:
