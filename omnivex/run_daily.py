@@ -178,7 +178,7 @@ def run(tickers: list = None, portfolio: dict = None, demo: bool = False,
 
     # DB — add these lines
     from data.db_writer import write_run
-    write_run(mode_result, scored, portfolio_plan=portfolio_plan)
+    write_run(mode_result, scored)
 
     # Summary
     buys = [s for s in scored if s.get("action") in ("BUY", "ADD")]

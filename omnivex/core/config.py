@@ -305,6 +305,31 @@ POSITION_SIZING = {
     "speculative":{"base": (0.01, 0.02), "max": 0.03, "score_bonus_threshold": 80},
 }
 
+ALLOCATOR_THRESHOLDS = {
+    "smart_core": {
+        "starter_score": 70,
+        "full_score": 75,
+        "persistence_runs": 2,
+        "starter_multiplier": 0.60,
+        "confirmed_multiplier": 1.00,
+    },
+    "tactical": {
+        "starter_score": 74,
+        "full_score": 80,
+        "persistence_runs": 2,
+        "starter_multiplier": 0.60,
+        "confirmed_multiplier": 0.85,
+        "breakout_multiplier": 1.00,
+    },
+    "speculative": {
+        "starter_score": 80,
+        "full_score": 80,
+        "persistence_runs": 1,
+        "starter_multiplier": 1.00,
+        "confirmed_multiplier": 1.00,
+    },
+}
+
 RISK_CONTROLS = {
     "max_single_name_pct": 0.08,
     "max_sector_pct": 0.25,

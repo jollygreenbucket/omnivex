@@ -111,14 +111,50 @@ def _load_portfolio_state(cur) -> tuple[list[dict], float | None, float]:
     return holdings, total_value, cash
 
 
+def _load_recent_signal_history(cur, run_date: str) -> dict[str, list[dict]]:
+    cur.execute(
+        """
+        WITH ranked AS (
+            SELECT
+                ticker,
+                run_date,
+                tier,
+                action,
+                omnivex_score,
+                ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY run_date DESC) AS rn
+            FROM scores
+            WHERE run_date < %s
+        )
+        SELECT ticker, run_date, tier, action, omnivex_score
+        FROM ranked
+        WHERE rn <= 3
+        ORDER BY ticker, run_date DESC
+        """,
+        (run_date,),
+    )
+    history: dict[str, list[dict]] = {}
+    for ticker, prior_run_date, tier, action, omnivex_score in cur.fetchall():
+        history.setdefault(str(ticker), []).append(
+            {
+                "run_date": prior_run_date.isoformat() if hasattr(prior_run_date, "isoformat") else str(prior_run_date),
+                "tier": tier,
+                "action": action,
+                "omnivex_score": float(omnivex_score or 0.0),
+            }
+        )
+    return history
+
+
 def _write_portfolio_plan(cur, run_date: str, mode_result: dict, scored: list, portfolio_plan: dict | None = None, strategy_config_id: int | None = None):
     holdings, total_value, cash = _load_portfolio_state(cur)
+    signal_history = _load_recent_signal_history(cur, run_date)
     plan = portfolio_plan or build_target_portfolio(
         mode_result,
         scored,
         holdings=holdings,
         total_portfolio_value=total_value,
         cash=cash,
+        signal_history=signal_history,
     )
 
     cur.execute("DELETE FROM rebalance_recommendations WHERE run_date = %s", (run_date,))
