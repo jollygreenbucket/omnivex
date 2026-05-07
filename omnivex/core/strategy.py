@@ -9,6 +9,7 @@ from core.config import (
     CHOP_GUARD,
     POSITION_SIZING,
     RISK_CONTROLS,
+    TAKE_PROFIT_RULES,
     TIER_ALLOCATION,
 )
 
@@ -43,6 +44,7 @@ def build_strategy_snapshot() -> dict:
         "tier_allocation": deepcopy(TIER_ALLOCATION),
         "position_sizing": deepcopy(POSITION_SIZING),
         "risk_controls": deepcopy(RISK_CONTROLS),
+        "take_profit_rules": deepcopy(TAKE_PROFIT_RULES),
         "chop_guard": deepcopy(CHOP_GUARD),
         "backtest_baseline": deepcopy(BACKTEST_BASELINE),
     }

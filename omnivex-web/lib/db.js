@@ -2,6 +2,138 @@ import { neon } from '@neondatabase/serverless'
 
 const sql = neon(process.env.POSTGRES_URL)
 
+const DEFAULT_RISK_POLICY = {
+  stops: {
+    SMART_CORE: -0.10,
+    TACTICAL: -0.12,
+    SPECULATIVE: -0.15,
+    UNASSIGNED: -0.12,
+  },
+  profitTargets: {
+    SMART_CORE: { target_pct: 0.20, trim_pct: 0.25, trailing_arm_pct: 0.12 },
+    TACTICAL: { target_pct: 0.18, trim_pct: 0.22, trailing_arm_pct: 0.10 },
+    SPECULATIVE: { target_pct: 0.25, trim_pct: 0.30, trailing_arm_pct: 0.10 },
+    UNASSIGNED: { target_pct: 0.18, trim_pct: 0.22, trailing_arm_pct: 0.10 },
+  },
+}
+
+function normalizeTier(tier) {
+  const value = String(tier || '').toUpperCase()
+  if (value.includes('SMART')) return 'SMART_CORE'
+  if (value.includes('TACTICAL')) return 'TACTICAL'
+  if (value.includes('SPEC')) return 'SPECULATIVE'
+  return 'UNASSIGNED'
+}
+
+function getRiskPolicy(strategyConfig) {
+  const controls = strategyConfig?.config_json?.risk_controls || {}
+  const takeProfit = strategyConfig?.config_json?.take_profit_rules || {}
+  return {
+    stops: {
+      SMART_CORE: Number(controls.stop_loss_smart_core ?? DEFAULT_RISK_POLICY.stops.SMART_CORE),
+      TACTICAL: Number(controls.stop_loss_tactical ?? DEFAULT_RISK_POLICY.stops.TACTICAL),
+      SPECULATIVE: Number(controls.stop_loss_speculative ?? DEFAULT_RISK_POLICY.stops.SPECULATIVE),
+      UNASSIGNED: DEFAULT_RISK_POLICY.stops.UNASSIGNED,
+    },
+    profitTargets: {
+      SMART_CORE: takeProfit.smart_core || DEFAULT_RISK_POLICY.profitTargets.SMART_CORE,
+      TACTICAL: takeProfit.tactical || DEFAULT_RISK_POLICY.profitTargets.TACTICAL,
+      SPECULATIVE: takeProfit.speculative || DEFAULT_RISK_POLICY.profitTargets.SPECULATIVE,
+      UNASSIGNED: DEFAULT_RISK_POLICY.profitTargets.UNASSIGNED,
+    },
+  }
+}
+
+function assessHoldingRisk(holding, strategyConfig) {
+  const tier = normalizeTier(holding?.tier)
+  const policy = getRiskPolicy(strategyConfig)
+  const stopLossPct = Number(policy.stops[tier] ?? DEFAULT_RISK_POLICY.stops.UNASSIGNED)
+  const targetRule = policy.profitTargets[tier] || DEFAULT_RISK_POLICY.profitTargets.UNASSIGNED
+  const avgCost = Number(holding?.avg_cost || 0)
+  const currentPrice = Number(holding?.current_price || 0)
+  const pnlPct = Number(holding?.unrealized_pnl_pct || 0)
+  const action = String(holding?.action || '')
+
+  if (!(avgCost > 0) || !(currentPrice > 0)) {
+    return {
+      status: 'no_basis',
+      label: 'No basis',
+      stopLossPct,
+      hardStopPrice: null,
+      targetPct: Number(targetRule.target_pct),
+      targetPrice: null,
+      trimPct: Number(targetRule.trim_pct),
+      trimPrice: null,
+      trailingArmPct: Number(targetRule.trailing_arm_pct),
+      distanceToStopPct: null,
+      distanceToTargetPct: null,
+      note: 'Average cost unavailable',
+    }
+  }
+
+  const hardStopPrice = avgCost * (1 + stopLossPct)
+  const targetPct = Number(targetRule.target_pct)
+  const trimPct = Number(targetRule.trim_pct)
+  const trailingArmPct = Number(targetRule.trailing_arm_pct)
+  const targetPrice = avgCost * (1 + targetPct)
+  const trimPrice = avgCost * (1 + trimPct)
+  const distanceToStopPct = hardStopPrice > 0 ? ((currentPrice / hardStopPrice) - 1) * 100 : null
+  const distanceToTargetPct = targetPrice > 0 ? ((targetPrice / currentPrice) - 1) * 100 : null
+
+  let status = 'normal'
+  let label = 'Normal'
+  let note = 'Inside normal risk band'
+
+  if (pnlPct <= stopLossPct * 100) {
+    status = 'stop_hit'
+    label = 'Stop Hit'
+    note = 'Below hard stop'
+  } else if (action === 'REMOVE') {
+    status = 'exit_signal'
+    label = 'Exit Signal'
+    note = 'Model action is REMOVE'
+  } else if (action === 'REDUCE') {
+    status = 'trim_signal'
+    label = 'Trim Signal'
+    note = 'Model action is REDUCE'
+  } else if (pnlPct >= trimPct * 100) {
+    status = 'trim_zone'
+    label = 'Trim Zone'
+    note = 'Past first profit-taking band'
+  } else if (pnlPct >= targetPct * 100) {
+    status = 'target_hit'
+    label = 'Target Hit'
+    note = 'At first take-profit band'
+  } else if (pnlPct >= trailingArmPct * 100) {
+    status = 'trail_armed'
+    label = 'Trail Armed'
+    note = 'Gain large enough for trailing stop discipline'
+  } else if (distanceToStopPct != null && distanceToStopPct <= 5) {
+    status = 'near_stop'
+    label = 'Near Stop'
+    note = 'Within 5% of hard stop'
+  } else if (distanceToTargetPct != null && distanceToTargetPct <= 5) {
+    status = 'near_target'
+    label = 'Near Target'
+    note = 'Within 5% of first target'
+  }
+
+  return {
+    status,
+    label,
+    note,
+    stopLossPct,
+    hardStopPrice,
+    targetPct,
+    targetPrice,
+    trimPct,
+    trimPrice,
+    trailingArmPct,
+    distanceToStopPct,
+    distanceToTargetPct,
+  }
+}
+
 // ─── Run & Scores ──────────────────────────────────────────────────────────
 
 export async function getLatestRun() {
@@ -157,6 +289,7 @@ export async function getScoreDistribution() {
 // ─── Portfolio ─────────────────────────────────────────────────────────────
 
 export async function getHoldings() {
+  const strategyConfig = await getLatestStrategyConfig()
   const rows = await sql`
     SELECT h.*, s.omnivex_score, s.action, s.qtech, s.psos, s.signal_conf
     FROM holdings h
@@ -164,7 +297,10 @@ export async function getHoldings() {
       AND s.run_date = (SELECT MAX(run_date) FROM runs)
     ORDER BY h.market_value DESC NULLS LAST
   `
-  return rows
+  return rows.map(row => ({
+    ...row,
+    risk: assessHoldingRisk(row, strategyConfig),
+  }))
 }
 
 export async function getTrades(limit = 100) {
@@ -227,6 +363,12 @@ export async function getPerformanceVsSpy(days = 90) {
 }
 
 export async function getRebalancePlan() {
+  const strategyConfig = await getLatestStrategyConfig()
+  const holdingBasisRows = await sql`
+    SELECT ticker, avg_cost, current_price, unrealized_pnl_pct, tier, market_value, shares
+    FROM holdings
+  `
+  const holdingBasis = new Map(holdingBasisRows.map(row => [row.ticker, row]))
   try {
     const summaryRows = await sql`
       SELECT *
@@ -267,6 +409,7 @@ export async function getRebalancePlan() {
           delta_weight_pct: Number(row.delta_weight_pct || 0),
           delta_value: Number(row.delta_value || 0),
           held: Boolean(row.held),
+          risk: row.held ? assessHoldingRisk({ ...holdingBasis.get(row.ticker), ...row }, strategyConfig) : null,
         })),
         summary: {
           buyCount: rows.filter(row => row.recommendation === 'ADD').length,
@@ -364,6 +507,7 @@ export async function getRebalancePlan() {
       market_value: currentValue,
       flags: score.flags,
       held: Boolean(holding),
+      risk: holding ? assessHoldingRisk({ ...holding, ...score }, strategyConfig) : null,
     }
   })
 
@@ -389,6 +533,7 @@ export async function getRebalancePlan() {
       market_value: currentValue,
       flags: null,
       held: true,
+      risk: assessHoldingRisk(holding, strategyConfig),
     })
   }
 

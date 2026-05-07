@@ -77,6 +77,16 @@ function tierBg(t) {
   if (t.includes('SPEC')) return '#e0a83218'
   return '#40486818'
 }
+function riskCol(status) {
+  if (status === 'stop_hit' || status === 'exit_signal') return '#f05555'
+  if (status === 'trim_signal' || status === 'trim_zone' || status === 'target_hit') return '#e0a832'
+  if (status === 'trail_armed' || status === 'near_target') return '#60b8ff'
+  if (status === 'near_stop') return '#ff7a55'
+  return '#6a7290'
+}
+function riskBg(status) {
+  return `${riskCol(status)}18`
+}
 
 // ─── Shared Components ─────────────────────────────────────────────────────
 
@@ -148,6 +158,22 @@ function TierPill({ tier }) {
       border: `1px solid ${tierCol(tier)}40`,
     }}>
       {tierLabel(tier)}
+    </span>
+  )
+}
+
+function RiskPill({ risk }) {
+  if (!risk) return <span style={{ color: 'var(--silver-2)', fontSize: 12 }}>—</span>
+  return (
+    <span style={{
+      fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 600,
+      letterSpacing: '.05em', textTransform: 'uppercase',
+      padding: '3px 8px', borderRadius: 4,
+      background: riskBg(risk.status), color: riskCol(risk.status),
+      border: `1px solid ${riskCol(risk.status)}40`,
+      whiteSpace: 'nowrap',
+    }}>
+      {risk.label}
     </span>
   )
 }
@@ -381,6 +407,13 @@ export default function Omnivex() {
   const totalPnl = holdings.reduce((s, h) => s + (h.unrealized_pnl || 0), 0)
   const totalCost = totalValue - totalPnl
   const totalPnlPct = totalCost > 0 ? (totalPnl / totalCost) * 100 : 0
+  const riskCounts = holdings.reduce((acc, holding) => {
+    const status = holding.risk?.status
+    if (status === 'stop_hit' || status === 'near_stop' || status === 'exit_signal') acc.defensive += 1
+    if (status === 'trim_zone' || status === 'target_hit' || status === 'trim_signal') acc.harvest += 1
+    if (status === 'trail_armed') acc.trailing += 1
+    return acc
+  }, { defensive: 0, harvest: 0, trailing: 0 })
 
   const targetAlloc = rebalance?.targetAlloc || ({
     ALPHA: { SMART_CORE: 35, TACTICAL: 45, SPECULATIVE: 15, CASH: 5 },
@@ -723,7 +756,7 @@ export default function Omnivex() {
               </div>
             ) : (
               <>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 12, marginBottom: 28 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8,1fr)', gap: 12, marginBottom: 28 }}>
                   <StatCard label="Total Value" value={fmtM(totalValue)} accent="var(--gold)" />
                   <StatCard label="Unrealized P&L" value={fmtM(totalPnl)}
                     sub={`${totalPnlPct>=0?'+':''}${fmt(totalPnlPct)}%`}
@@ -731,6 +764,9 @@ export default function Omnivex() {
                   <StatCard label="Positions" value={holdings.length} />
                   <StatCard label="Cash" value={fmtM(snap?.cash)} />
                   <StatCard label="Mode" value={modeLabel(mode)} accent={accent} />
+                  <StatCard label="Near Stop" value={riskCounts.defensive} accent="var(--hedge)" />
+                  <StatCard label="Profit Zones" value={riskCounts.harvest} accent="var(--gold)" />
+                  <StatCard label="Trail Armed" value={riskCounts.trailing} accent="#60b8ff" />
                 </div>
 
                 {mounted && perfChart.length > 0 && (
@@ -816,7 +852,7 @@ export default function Omnivex() {
                           <thead>
                             <tr>
                               <th>Ticker</th><th>Tier</th><th>Rec</th><th>Action</th>
-                              <th>Current Wt</th><th>Target Wt</th><th>Delta $</th><th>Reason</th><th>Score</th>
+                              <th>Current Wt</th><th>Target Wt</th><th>Delta $</th><th>Risk</th><th>Stop</th><th>Target</th><th>Reason</th><th>Score</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -829,6 +865,13 @@ export default function Omnivex() {
                                 <td style={{ fontFamily: 'var(--font-mono)' }}>{fmt(row.current_weight_pct, 2)}%</td>
                                 <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{fmt(row.target_weight_pct ?? row.suggested_weight_pct, 2)}%</td>
                                 <td className={row.delta_value >= 0 ? 'c-pos' : 'c-neg'} style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{fmtM(row.delta_value)}</td>
+                                <td><RiskPill risk={row.risk} /></td>
+                                <td style={{ fontFamily: 'var(--font-mono)', color: 'var(--silver-2)', fontSize: 12 }}>
+                                  {row.risk?.hardStopPrice ? `$${fmt(row.risk.hardStopPrice, 2)}` : '—'}
+                                </td>
+                                <td style={{ fontFamily: 'var(--font-mono)', color: 'var(--silver-2)', fontSize: 12 }}>
+                                  {row.risk?.targetPrice ? `$${fmt(row.risk.targetPrice, 2)}` : '—'}
+                                </td>
                                 <td style={{ color: 'var(--silver-2)', fontSize: 12 }}>{row.recommendation_reason || row.reason || '—'}</td>
                                 <td>{row.omnivex_score == null ? '—' : <ScorePill value={row.omnivex_score} />}</td>
                               </tr>
@@ -844,7 +887,7 @@ export default function Omnivex() {
                 <div className="card" style={{ padding: 0, overflow: 'hidden', marginBottom: 24 }}>
                   <div style={{ overflowX: 'auto' }}>
                     <table className="pq-table">
-                      <thead><tr><th>Ticker</th><th>Tier</th><th>Shares</th><th>Avg Cost</th><th>Price</th><th>Value</th><th>P&L</th><th>P&L %</th><th>Score</th><th>Action</th></tr></thead>
+                      <thead><tr><th>Ticker</th><th>Tier</th><th>Shares</th><th>Avg Cost</th><th>Price</th><th>Value</th><th>P&L</th><th>P&L %</th><th>Risk</th><th>Stop</th><th>Target</th><th>Score</th><th>Action</th></tr></thead>
                       <tbody>
                         {holdings.map(h => (
                           <tr key={h.ticker} onClick={() => setFocusTicker(h.ticker)}>
@@ -856,6 +899,13 @@ export default function Omnivex() {
                             <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 500 }}>{fmtM(h.market_value)}</td>
                             <td className={(h.unrealized_pnl||0)>=0?'c-pos':'c-neg'} style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{fmtM(h.unrealized_pnl)}</td>
                             <td className={(h.unrealized_pnl_pct||0)>=0?'c-pos':'c-neg'} style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{fmtPct(h.unrealized_pnl_pct)}</td>
+                            <td><RiskPill risk={h.risk} /></td>
+                            <td style={{ fontFamily: 'var(--font-mono)', color: 'var(--silver-2)', fontSize: 12 }}>
+                              {h.risk?.hardStopPrice ? `$${fmt(h.risk.hardStopPrice,2)}` : '—'}
+                            </td>
+                            <td style={{ fontFamily: 'var(--font-mono)', color: 'var(--silver-2)', fontSize: 12 }}>
+                              {h.risk?.targetPrice ? `$${fmt(h.risk.targetPrice,2)}` : '—'}
+                            </td>
                             <td><ScorePill value={h.omnivex_score} /></td>
                             <td className={`c-${(h.action||'monitor').toLowerCase()}`} style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600 }}>{h.action||'—'}</td>
                           </tr>

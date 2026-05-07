@@ -335,9 +335,16 @@ RISK_CONTROLS = {
     "max_sector_pct": 0.25,
     "stop_loss_tactical": -0.12,
     "stop_loss_speculative": -0.15,
+    "stop_loss_smart_core": -0.10,
     "trailing_stop_min": 0.10,
     "trailing_stop_max": 0.20,
     "neutral_min_cash": 0.10,
+}
+
+TAKE_PROFIT_RULES = {
+    "smart_core": {"target_pct": 0.20, "trim_pct": 0.25, "trailing_arm_pct": 0.12},
+    "tactical": {"target_pct": 0.18, "trim_pct": 0.22, "trailing_arm_pct": 0.10},
+    "speculative": {"target_pct": 0.25, "trim_pct": 0.30, "trailing_arm_pct": 0.10},
 }
 
 # ─────────────────────────────────────────────
