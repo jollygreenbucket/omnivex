@@ -303,6 +303,60 @@ export async function getHoldings() {
   }))
 }
 
+export async function upsertHolding(input) {
+  const ticker = String(input?.ticker || '').trim().toUpperCase()
+  const shares = Number(input?.shares)
+  const avgCost = Number(input?.avgCost)
+  const currentPrice = input?.currentPrice == null || input.currentPrice === ''
+    ? avgCost
+    : Number(input.currentPrice)
+  const dateEntered = input?.dateEntered || null
+
+  if (!ticker) throw new Error('Ticker is required')
+  if (!(shares > 0)) throw new Error('Shares must be greater than 0')
+  if (!(avgCost > 0)) throw new Error('Average cost must be greater than 0')
+  if (!(currentPrice > 0)) throw new Error('Current price must be greater than 0')
+
+  const latestScoreRows = await sql`
+    SELECT tier
+    FROM scores
+    WHERE ticker = ${ticker}
+      AND run_date = (SELECT MAX(run_date) FROM runs)
+    LIMIT 1
+  `
+  const tier = latestScoreRows[0]?.tier || 'MONITOR'
+  const marketValue = shares * currentPrice
+  const unrealizedPnl = (currentPrice - avgCost) * shares
+  const unrealizedPnlPct = avgCost > 0 ? ((currentPrice / avgCost) - 1) * 100 : 0
+
+  const rows = await sql`
+    INSERT INTO holdings (
+      ticker, shares, avg_cost, current_price, market_value,
+      unrealized_pnl, unrealized_pnl_pct, tier, date_entered, updated_at
+    ) VALUES (
+      ${ticker}, ${shares}, ${avgCost}, ${currentPrice}, ${marketValue},
+      ${unrealizedPnl}, ${unrealizedPnlPct}, ${tier}, ${dateEntered}::date, NOW()
+    )
+    ON CONFLICT (ticker) DO UPDATE SET
+      shares = EXCLUDED.shares,
+      avg_cost = EXCLUDED.avg_cost,
+      current_price = EXCLUDED.current_price,
+      market_value = EXCLUDED.market_value,
+      unrealized_pnl = EXCLUDED.unrealized_pnl,
+      unrealized_pnl_pct = EXCLUDED.unrealized_pnl_pct,
+      tier = EXCLUDED.tier,
+      date_entered = COALESCE(EXCLUDED.date_entered, holdings.date_entered),
+      updated_at = NOW()
+    RETURNING *
+  `
+
+  const strategyConfig = await getLatestStrategyConfig()
+  return {
+    ...rows[0],
+    risk: assessHoldingRisk(rows[0], strategyConfig),
+  }
+}
+
 export async function getTrades(limit = 100) {
   const rows = await sql`
     SELECT * FROM trades ORDER BY trade_date DESC, created_at DESC LIMIT ${limit}

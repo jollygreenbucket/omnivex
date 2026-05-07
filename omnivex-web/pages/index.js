@@ -205,6 +205,16 @@ export default function Omnivex() {
   const [runStatus, setRunStatus] = useState(null)
   const [triggeringRun, setTriggeringRun] = useState(false)
   const [runError, setRunError] = useState(null)
+  const [savingHolding, setSavingHolding] = useState(false)
+  const [holdingError, setHoldingError] = useState(null)
+  const [holdingSuccess, setHoldingSuccess] = useState(null)
+  const [holdingForm, setHoldingForm] = useState({
+    ticker: '',
+    shares: '',
+    avgCost: '',
+    currentPrice: '',
+    dateEntered: '',
+  })
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [tierF, setTierF] = useState('ALL')
@@ -348,6 +358,38 @@ export default function Omnivex() {
     } catch (err) {
       setBacktestError(err.message)
       setTriggeringBacktest(false)
+    }
+  }
+
+  async function handleAddHolding(e) {
+    e.preventDefault()
+    setSavingHolding(true)
+    setHoldingError(null)
+    setHoldingSuccess(null)
+
+    try {
+      const response = await fetch('/api/portfolio', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(holdingForm),
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'Failed to save holding')
+
+      setHoldingSuccess(`${data.holding.ticker} saved`)
+      setHoldingForm({
+        ticker: '',
+        shares: '',
+        avgCost: '',
+        currentPrice: '',
+        dateEntered: '',
+      })
+      const refreshed = await fetch('/api/portfolio').then(r => r.json())
+      setPortData(refreshed)
+    } catch (err) {
+      setHoldingError(err.message)
+    } finally {
+      setSavingHolding(false)
     }
   }
 
@@ -749,6 +791,98 @@ export default function Omnivex() {
         {/* ══ PORTFOLIO TAB ══ */}
         {tab === 'portfolio' && (
           <div>
+            <div className="card" style={{ marginBottom: 20 }}>
+              <div className="label" style={{ marginBottom: 14, fontSize: 11 }}>Manual Holding Entry</div>
+              <form onSubmit={handleAddHolding}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 1fr 1fr 1fr 1fr auto', gap: 12, alignItems: 'end' }}>
+                  <div>
+                    <div className="label" style={{ marginBottom: 6, fontSize: 10 }}>Ticker</div>
+                    <input
+                      className="pq-input"
+                      value={holdingForm.ticker}
+                      onChange={e => setHoldingForm({ ...holdingForm, ticker: e.target.value.toUpperCase() })}
+                      placeholder="AAPL"
+                      maxLength={10}
+                    />
+                  </div>
+                  <div>
+                    <div className="label" style={{ marginBottom: 6, fontSize: 10 }}>Shares</div>
+                    <input
+                      className="pq-input"
+                      type="number"
+                      min="0"
+                      step="0.0001"
+                      value={holdingForm.shares}
+                      onChange={e => setHoldingForm({ ...holdingForm, shares: e.target.value })}
+                      placeholder="10"
+                    />
+                  </div>
+                  <div>
+                    <div className="label" style={{ marginBottom: 6, fontSize: 10 }}>Avg Cost</div>
+                    <input
+                      className="pq-input"
+                      type="number"
+                      min="0"
+                      step="0.0001"
+                      value={holdingForm.avgCost}
+                      onChange={e => setHoldingForm({ ...holdingForm, avgCost: e.target.value })}
+                      placeholder="185.25"
+                    />
+                  </div>
+                  <div>
+                    <div className="label" style={{ marginBottom: 6, fontSize: 10 }}>Current Price</div>
+                    <input
+                      className="pq-input"
+                      type="number"
+                      min="0"
+                      step="0.0001"
+                      value={holdingForm.currentPrice}
+                      onChange={e => setHoldingForm({ ...holdingForm, currentPrice: e.target.value })}
+                      placeholder="Optional"
+                    />
+                  </div>
+                  <div>
+                    <div className="label" style={{ marginBottom: 6, fontSize: 10 }}>Date Entered</div>
+                    <input
+                      className="pq-input"
+                      type="date"
+                      value={holdingForm.dateEntered}
+                      onChange={e => setHoldingForm({ ...holdingForm, dateEntered: e.target.value })}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+                    <button
+                      type="submit"
+                      disabled={savingHolding}
+                      style={{
+                        background: savingHolding ? '#232840' : accent,
+                        color: savingHolding ? '#9aa3c7' : '#071018',
+                        border: 'none',
+                        borderRadius: 6,
+                        padding: '10px 16px',
+                        fontFamily: 'var(--font-mono)',
+                        fontSize: 12,
+                        fontWeight: 700,
+                        letterSpacing: '.04em',
+                        cursor: savingHolding ? 'not-allowed' : 'pointer',
+                      }}
+                    >
+                      {savingHolding ? 'Saving...' : 'Save Holding'}
+                    </button>
+                    {holdingSuccess && <span style={{ fontSize: 10, color: '#2de0aa', fontFamily: 'var(--font-mono)' }}>{holdingSuccess}</span>}
+                  </div>
+                </div>
+              </form>
+              <div style={{ marginTop: 10, color: 'var(--silver-2)', fontSize: 12 }}>
+                Manual entries upsert directly into `holdings`. If the ticker exists in the latest Omnivex run, its tier is inferred automatically.
+              </div>
+              {holdingError && (
+                <div style={{ marginTop: 10, color: 'var(--hedge)', fontSize: 12 }}>
+                  {holdingError}
+                </div>
+              )}
+            </div>
+
             {holdings.length === 0 ? (
               <div className="card" style={{ textAlign: 'center', padding: 80 }}>
                 <div style={{ fontFamily: 'var(--font-serif)', fontSize: 28, color: 'var(--gold)', marginBottom: 16, fontWeight: 500 }}>No Holdings</div>
