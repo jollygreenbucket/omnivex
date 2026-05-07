@@ -293,10 +293,10 @@ def _research_run_dates(history_map: dict[str, pd.DataFrame], config: Historical
 
 
 def persist_historical_repository(result: dict) -> None:
-    conn = get_connection()
-    try:
-        cur = conn.cursor()
-        for run in result["runs"]:
+    for run in result["runs"]:
+        conn = get_connection()
+        try:
+            cur = conn.cursor()
             cur.execute(
                 """
                 INSERT INTO research_runs (
@@ -359,9 +359,9 @@ def persist_historical_repository(result: dict) -> None:
                 score_rows,
             )
 
-        conn.commit()
-    finally:
-        conn.close()
+            conn.commit()
+        finally:
+            conn.close()
 
 
 def build_historical_repository(config: HistoricalRepositoryConfig) -> dict:

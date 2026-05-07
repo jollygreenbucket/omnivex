@@ -32,6 +32,48 @@ class ResearchReplayConfig:
     frequency: str = "W-FRI"
 
 
+@dataclass(frozen=True)
+class RegimeWindow:
+    name: str
+    start_date: str
+    end_date: str
+    description: str
+
+
+DEFAULT_REGIME_WINDOWS: tuple[RegimeWindow, ...] = (
+    RegimeWindow(
+        name="covid_crash",
+        start_date="2020-02-14",
+        end_date="2020-03-27",
+        description="COVID crash and forced de-risking window.",
+    ),
+    RegimeWindow(
+        name="covid_rebound",
+        start_date="2020-04-03",
+        end_date="2020-08-28",
+        description="Post-crash rebound and rapid re-risking window.",
+    ),
+    RegimeWindow(
+        name="inflation_drawdown",
+        start_date="2022-01-07",
+        end_date="2022-10-14",
+        description="Inflation and rate-shock drawdown regime.",
+    ),
+    RegimeWindow(
+        name="ai_concentration",
+        start_date="2023-01-06",
+        end_date="2024-03-29",
+        description="AI-led concentration and mega-cap leadership regime.",
+    ),
+    RegimeWindow(
+        name="rotation_chop",
+        start_date="2024-04-05",
+        end_date="2025-12-26",
+        description="Broad rotation and chop regime after initial AI surge.",
+    ),
+)
+
+
 def _load_runs(config: ResearchReplayConfig) -> pd.DataFrame:
     conn = get_connection()
     try:
@@ -108,6 +150,49 @@ def _build_period_rows(scores: pd.DataFrame, run_date: str, next_run_date: str, 
             }
         )
     return valid_rows
+
+
+def _regime_metrics(window: RegimeWindow, frame: pd.DataFrame) -> dict:
+    segment = frame.copy()
+    segment["run_date"] = pd.to_datetime(segment["run_date"])
+    mask = (
+        (segment["run_date"] >= pd.to_datetime(window.start_date))
+        & (segment["run_date"] <= pd.to_datetime(window.end_date))
+    )
+    segment = segment.loc[mask].copy()
+    if segment.empty:
+        return {}
+
+    segment["next_run_date"] = pd.to_datetime(segment["next_run_date"]).dt.date.astype(str)
+    segment["run_date"] = segment["run_date"].dt.date.astype(str)
+    metrics = _period_metrics(segment)
+    benchmark_total_return = float((1 + segment["benchmark_return"].fillna(0.0)).cumprod().iloc[-1] - 1)
+
+    return {
+        "name": window.name,
+        "start_date": window.start_date,
+        "end_date": window.end_date,
+        "description": window.description,
+        "periods": metrics["periods"],
+        "total_return_pct": metrics["total_return_pct"],
+        "benchmark_return_pct": round(benchmark_total_return * 100, 2),
+        "cagr_pct": metrics["cagr_pct"],
+        "volatility_pct": metrics["volatility_pct"],
+        "sharpe": metrics["sharpe"],
+        "max_drawdown_pct": metrics["max_drawdown_pct"],
+        "turnover_pct": metrics["turnover_pct"],
+        "avg_holdings": round(float(segment["holdings"].mean()), 2),
+        "mode_mix": segment["mode"].value_counts().to_dict(),
+    }
+
+
+def summarize_regimes(equity_curve: pd.DataFrame, windows: Iterable[RegimeWindow] = DEFAULT_REGIME_WINDOWS) -> list[dict]:
+    summaries: list[dict] = []
+    for window in windows:
+        metrics = _regime_metrics(window, equity_curve)
+        if metrics:
+            summaries.append(metrics)
+    return summaries
 
 
 def run_research_replay_backtest(config: ResearchReplayConfig) -> dict:
@@ -195,6 +280,7 @@ def run_research_replay_backtest(config: ResearchReplayConfig) -> dict:
     equity_curve["equity"] = (1 + equity_curve["portfolio_return"]).cumprod()
     equity_curve["benchmark_equity"] = (1 + equity_curve["benchmark_return"]).cumprod()
     metrics = _period_metrics(equity_curve)
+    regime_summaries = summarize_regimes(equity_curve)
 
     return {
         "config": config,
@@ -202,6 +288,7 @@ def run_research_replay_backtest(config: ResearchReplayConfig) -> dict:
         "equity_curve": equity_curve,
         "positions": pd.DataFrame(position_rows),
         "diagnostics": diagnostics,
+        "regimes": regime_summaries,
     }
 
 

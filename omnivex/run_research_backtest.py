@@ -51,6 +51,7 @@ def main() -> int:
     result = run_research_replay_backtest(config)
     backtest_id = persist_research_backtest(result)
     metrics = result["metrics"]
+    regimes = result.get("regimes", [])
 
     print("\nOMNIVEX RESEARCH REPLAY BACKTEST")
     print(f"  Backtest ID:  {backtest_id}")
@@ -61,6 +62,15 @@ def main() -> int:
     print(f"  Sharpe:       {metrics['sharpe']}")
     print(f"  Max DD:       {metrics['max_drawdown_pct']}%")
     print(f"  Turnover:     {metrics['turnover_pct']}% avg/rebalance")
+    if regimes:
+        print("\nREGIME WINDOWS")
+        for regime in regimes:
+            print(
+                f"  {regime['name']}: {regime['start_date']} -> {regime['end_date']} | "
+                f"periods={regime['periods']} return={regime['total_return_pct']}% "
+                f"bench={regime['benchmark_return_pct']}% max_dd={regime['max_drawdown_pct']}% "
+                f"turnover={regime['turnover_pct']}%"
+            )
     return 0
 
 

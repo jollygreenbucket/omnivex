@@ -97,7 +97,13 @@ def _download_prices(tickers: list[str], start_date: str, end_date: str) -> dict
 
     for ticker in tickers:
         try:
-            if len(tickers) == 1:
+            if isinstance(data.columns, pd.MultiIndex):
+                if len(tickers) == 1:
+                    close_level = "Price" if "Price" in (data.columns.names or []) else -1
+                    close = data.xs("Close", axis=1, level=close_level)[ticker].dropna()
+                else:
+                    close = data[ticker]["Close"].dropna()
+            elif len(tickers) == 1:
                 close = data["Close"].dropna()
             else:
                 close = data[ticker]["Close"].dropna()

@@ -3,14 +3,31 @@ from unittest.mock import patch
 
 import pandas as pd
 
+from backtest.replay import _download_prices
 from backtest.research_replay import (
+    RegimeWindow,
     ResearchReplayConfig,
     _build_period_rows,
     run_research_replay_backtest,
+    summarize_regimes,
 )
 
 
 class ResearchReplayTests(unittest.TestCase):
+    @patch("backtest.replay.yf.download")
+    def test_download_prices_handles_single_ticker_multiindex(self, mock_download):
+        idx = pd.to_datetime(["2024-04-05", "2024-04-08", "2024-04-12", "2024-04-15"])
+        mock_download.return_value = pd.DataFrame(
+            {
+                ("SPY", "Close"): [100.0, 101.0, 103.0, 104.0],
+            },
+            index=idx,
+        )
+
+        prices = _download_prices(["SPY"], "2024-04-05", "2024-04-12")
+
+        self.assertEqual(prices["SPY"], (101.0, 104.0))
+
     def test_build_period_rows_uses_downloaded_prices(self):
         scores = pd.DataFrame(
             [
@@ -52,6 +69,45 @@ class ResearchReplayTests(unittest.TestCase):
         message = str(ctx.exception)
         self.assertIn("price_drops=1", message)
         self.assertIn("AAA", message)
+
+    def test_summarize_regimes_builds_segment_metrics(self):
+        equity_curve = pd.DataFrame(
+            [
+                {
+                    "run_date": "2022-01-07",
+                    "next_run_date": "2022-01-14",
+                    "mode": "HEDGE",
+                    "holdings": 8,
+                    "portfolio_return": -0.02,
+                    "benchmark_return": -0.03,
+                    "turnover_pct": 40.0,
+                },
+                {
+                    "run_date": "2022-01-14",
+                    "next_run_date": "2022-01-21",
+                    "mode": "HEDGE",
+                    "holdings": 7,
+                    "portfolio_return": 0.01,
+                    "benchmark_return": -0.01,
+                    "turnover_pct": 20.0,
+                },
+            ]
+        )
+        windows = (
+            RegimeWindow(
+                name="test_window",
+                start_date="2022-01-01",
+                end_date="2022-01-31",
+                description="Synthetic test window",
+            ),
+        )
+
+        summaries = summarize_regimes(equity_curve, windows)
+
+        self.assertEqual(len(summaries), 1)
+        self.assertEqual(summaries[0]["name"], "test_window")
+        self.assertEqual(summaries[0]["periods"], 2)
+        self.assertIn("HEDGE", summaries[0]["mode_mix"])
 
 
 if __name__ == "__main__":
