@@ -30,6 +30,7 @@ from data.fetcher import (
     _is_atr_compressed,
     _period_return,
 )
+from output.reporter import assign_action, calc_suggested_weight
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 CACHE_DIR = BASE_DIR / "research_cache"
@@ -394,6 +395,7 @@ def build_historical_repository(config: HistoricalRepositoryConfig) -> dict:
 
         scores.sort(key=lambda row: row.get("omnivex_score", 0), reverse=True)
         mode = "CORE"
+        mode_result = {"mode": "CORE"}
         try:
             from core.mode_detector import detect_mode
 
@@ -401,6 +403,11 @@ def build_historical_repository(config: HistoricalRepositoryConfig) -> dict:
             mode = mode_result.get("mode", "CORE")
         except Exception:
             mode = "CORE"
+            mode_result = {"mode": "CORE"}
+
+        for scored in scores:
+            scored["action"] = assign_action(scored, portfolio={}, mode=mode)
+            scored["suggested_weight_pct"] = calc_suggested_weight(scored, mode)
 
         runs.append(
             {
