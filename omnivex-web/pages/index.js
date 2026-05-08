@@ -215,6 +215,19 @@ export default function Omnivex() {
     currentPrice: '',
     dateEntered: '',
   })
+  const [savingTransaction, setSavingTransaction] = useState(false)
+  const [transactionError, setTransactionError] = useState(null)
+  const [transactionSuccess, setTransactionSuccess] = useState(null)
+  const [transactionForm, setTransactionForm] = useState({
+    ticker: '',
+    transactionType: 'BUY',
+    shares: '',
+    price: '',
+    amount: '',
+    currentPrice: '',
+    transactionDate: '',
+    notes: '',
+  })
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [tierF, setTierF] = useState('ALL')
@@ -393,6 +406,41 @@ export default function Omnivex() {
     }
   }
 
+  async function handleAddTransaction(e) {
+    e.preventDefault()
+    setSavingTransaction(true)
+    setTransactionError(null)
+    setTransactionSuccess(null)
+
+    try {
+      const response = await fetch('/api/portfolio-transactions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(transactionForm),
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'Failed to save transaction')
+
+      setTransactionSuccess(`${data.transaction.ticker} ${String(data.transaction.transaction_type || '').toLowerCase()} recorded`)
+      setTransactionForm({
+        ticker: '',
+        transactionType: 'BUY',
+        shares: '',
+        price: '',
+        amount: '',
+        currentPrice: '',
+        transactionDate: '',
+        notes: '',
+      })
+      const refreshed = await fetch('/api/portfolio').then(r => r.json())
+      setPortData(refreshed)
+    } catch (err) {
+      setTransactionError(err.message)
+    } finally {
+      setSavingTransaction(false)
+    }
+  }
+
   const scores = useMemo(() => {
     if (!dashData?.scores) return []
     return dashData.scores
@@ -440,13 +488,14 @@ export default function Omnivex() {
 
   const holdings = portData?.holdings || []
   const trades = portData?.trades || []
+  const transactions = portData?.transactions || []
   const allocation = portData?.allocation || []
   const snap = portData?.snapshot
   const rebalance = portData?.rebalance
   const strategyConfig = dashData?.strategyConfig
 
-  const totalValue = holdings.reduce((s, h) => s + (h.market_value || 0), 0)
-  const totalPnl = holdings.reduce((s, h) => s + (h.unrealized_pnl || 0), 0)
+  const totalValue = holdings.reduce((s, h) => s + Number(h.market_value || 0), 0)
+  const totalPnl = holdings.reduce((s, h) => s + Number(h.unrealized_pnl || 0), 0)
   const totalCost = totalValue - totalPnl
   const totalPnlPct = totalCost > 0 ? (totalPnl / totalCost) * 100 : 0
   const riskCounts = holdings.reduce((acc, holding) => {
@@ -883,10 +932,136 @@ export default function Omnivex() {
               )}
             </div>
 
+            <div className="card" style={{ marginBottom: 20 }}>
+              <div className="label" style={{ marginBottom: 14, fontSize: 11 }}>Portfolio Transaction Entry</div>
+              <form onSubmit={handleAddTransaction}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr 1fr 1fr auto', gap: 12, alignItems: 'end' }}>
+                  <div>
+                    <div className="label" style={{ marginBottom: 6, fontSize: 10 }}>Ticker</div>
+                    <input
+                      className="pq-input"
+                      value={transactionForm.ticker}
+                      onChange={e => setTransactionForm({ ...transactionForm, ticker: e.target.value.toUpperCase() })}
+                      placeholder="AVGO"
+                      maxLength={10}
+                    />
+                  </div>
+                  <div>
+                    <div className="label" style={{ marginBottom: 6, fontSize: 10 }}>Type</div>
+                    <select
+                      className="pq-input"
+                      value={transactionForm.transactionType}
+                      onChange={e => setTransactionForm({ ...transactionForm, transactionType: e.target.value })}
+                    >
+                      <option value="BUY">BUY</option>
+                      <option value="SELL">SELL</option>
+                      <option value="DRIP">DRIP</option>
+                      <option value="DIVIDEND">DIVIDEND</option>
+                    </select>
+                  </div>
+                  <div>
+                    <div className="label" style={{ marginBottom: 6, fontSize: 10 }}>Shares</div>
+                    <input
+                      className="pq-input"
+                      type="number"
+                      min="0"
+                      step="0.0001"
+                      value={transactionForm.shares}
+                      onChange={e => setTransactionForm({ ...transactionForm, shares: e.target.value })}
+                      placeholder={transactionForm.transactionType === 'DIVIDEND' ? 'Optional' : '0.2768'}
+                    />
+                  </div>
+                  <div>
+                    <div className="label" style={{ marginBottom: 6, fontSize: 10 }}>Price</div>
+                    <input
+                      className="pq-input"
+                      type="number"
+                      min="0"
+                      step="0.0001"
+                      value={transactionForm.price}
+                      onChange={e => setTransactionForm({ ...transactionForm, price: e.target.value })}
+                      placeholder={transactionForm.transactionType === 'DIVIDEND' ? 'Optional' : '300.00'}
+                    />
+                  </div>
+                  <div>
+                    <div className="label" style={{ marginBottom: 6, fontSize: 10 }}>Amount</div>
+                    <input
+                      className="pq-input"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={transactionForm.amount}
+                      onChange={e => setTransactionForm({ ...transactionForm, amount: e.target.value })}
+                      placeholder={transactionForm.transactionType === 'DIVIDEND' ? 'Required' : 'Auto'}
+                    />
+                  </div>
+                  <div>
+                    <div className="label" style={{ marginBottom: 6, fontSize: 10 }}>Current Price</div>
+                    <input
+                      className="pq-input"
+                      type="number"
+                      min="0"
+                      step="0.0001"
+                      value={transactionForm.currentPrice}
+                      onChange={e => setTransactionForm({ ...transactionForm, currentPrice: e.target.value })}
+                      placeholder="Optional"
+                    />
+                  </div>
+                  <div>
+                    <div className="label" style={{ marginBottom: 6, fontSize: 10 }}>Date</div>
+                    <input
+                      className="pq-input"
+                      type="date"
+                      value={transactionForm.transactionDate}
+                      onChange={e => setTransactionForm({ ...transactionForm, transactionDate: e.target.value })}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+                    <button
+                      type="submit"
+                      disabled={savingTransaction}
+                      style={{
+                        background: savingTransaction ? '#232840' : accent,
+                        color: savingTransaction ? '#9aa3c7' : '#071018',
+                        border: 'none',
+                        borderRadius: 6,
+                        padding: '10px 16px',
+                        fontFamily: 'var(--font-mono)',
+                        fontSize: 12,
+                        fontWeight: 700,
+                        letterSpacing: '.04em',
+                        cursor: savingTransaction ? 'not-allowed' : 'pointer',
+                      }}
+                    >
+                      {savingTransaction ? 'Saving...' : 'Add Transaction'}
+                    </button>
+                    {transactionSuccess && <span style={{ fontSize: 10, color: '#2de0aa', fontFamily: 'var(--font-mono)' }}>{transactionSuccess}</span>}
+                  </div>
+                </div>
+                <div style={{ marginTop: 12 }}>
+                  <div className="label" style={{ marginBottom: 6, fontSize: 10 }}>Notes</div>
+                  <input
+                    className="pq-input"
+                    value={transactionForm.notes}
+                    onChange={e => setTransactionForm({ ...transactionForm, notes: e.target.value })}
+                    placeholder="Original buy, dividend reinvestment, partial sale..."
+                  />
+                </div>
+              </form>
+              <div style={{ marginTop: 10, color: 'var(--silver-2)', fontSize: 12 }}>
+                Record original buys, DRIPs, and sells here. The app rolls `holdings` forward from this ledger and updates blended cost basis automatically.
+              </div>
+              {transactionError && (
+                <div style={{ marginTop: 10, color: 'var(--hedge)', fontSize: 12 }}>
+                  {transactionError}
+                </div>
+              )}
+            </div>
+
             {holdings.length === 0 ? (
               <div className="card" style={{ textAlign: 'center', padding: 80 }}>
                 <div style={{ fontFamily: 'var(--font-serif)', fontSize: 28, color: 'var(--gold)', marginBottom: 16, fontWeight: 500 }}>No Holdings</div>
-                <div style={{ color: 'var(--silver-2)', fontSize: 14 }}>Connect Schwab or add holdings directly in Neon.</div>
+                <div style={{ color: 'var(--silver-2)', fontSize: 14 }}>Connect Schwab, add a manual holding, or record original buy transactions here.</div>
               </div>
             ) : (
               <>
@@ -965,6 +1140,63 @@ export default function Omnivex() {
                   </div>
                 </div>
 
+                <SectionLabel>Current Holdings</SectionLabel>
+                <div className="card" style={{ padding: 0, overflow: 'hidden', marginBottom: 24 }}>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table className="pq-table">
+                      <thead><tr><th>Ticker</th><th>Tier</th><th>Shares</th><th>Avg Cost</th><th>Price</th><th>Value</th><th>P&L</th><th>P&L %</th><th>Risk</th><th>Stop</th><th>Target</th><th>Score</th><th>Action</th></tr></thead>
+                      <tbody>
+                        {holdings.map(h => (
+                          <tr key={h.ticker} onClick={() => setFocusTicker(h.ticker)}>
+                            <td><span style={{ fontWeight: 600, fontSize: 14 }}>{h.ticker}</span></td>
+                            <td><TierPill tier={h.tier} /></td>
+                            <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 500 }}>{fmt(h.shares, h.shares > 0 && h.shares < 1 ? 4 : 2)}</td>
+                            <td style={{ fontFamily: 'var(--font-mono)' }}>${fmt(h.avg_cost,2)}</td>
+                            <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 500 }}>${fmt(h.current_price,2)}</td>
+                            <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 500 }}>{fmtM(h.market_value)}</td>
+                            <td className={(h.unrealized_pnl||0)>=0?'c-pos':'c-neg'} style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{fmtM(h.unrealized_pnl)}</td>
+                            <td className={(h.unrealized_pnl_pct||0)>=0?'c-pos':'c-neg'} style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{fmtPct(h.unrealized_pnl_pct)}</td>
+                            <td><RiskPill risk={h.risk} /></td>
+                            <td style={{ fontFamily: 'var(--font-mono)', color: 'var(--silver-2)', fontSize: 12 }}>
+                              {h.risk?.hardStopPrice ? `$${fmt(h.risk.hardStopPrice,2)}` : '—'}
+                            </td>
+                            <td style={{ fontFamily: 'var(--font-mono)', color: 'var(--silver-2)', fontSize: 12 }}>
+                              {h.risk?.targetPrice ? `$${fmt(h.risk.targetPrice,2)}` : '—'}
+                            </td>
+                            <td><ScorePill value={h.omnivex_score} /></td>
+                            <td className={`c-${(h.action||'monitor').toLowerCase()}`} style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600 }}>{h.action||'—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <SectionLabel>Portfolio Ledger</SectionLabel>
+                <div className="card" style={{ padding: 0, overflow: 'hidden', marginBottom: 24 }}>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table className="pq-table">
+                      <thead><tr><th>Date</th><th>Ticker</th><th>Type</th><th>Shares</th><th>Price</th><th>Amount</th><th>Notes</th></tr></thead>
+                      <tbody>
+                        {transactions.map(t => (
+                          <tr key={t.id}>
+                            <td style={{ fontFamily: 'var(--font-mono)', color: 'var(--silver)' }}>{fmtDate(t.transaction_date)}</td>
+                            <td><span style={{ fontWeight: 600 }}>{t.ticker}</span></td>
+                            <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600 }}>{t.transaction_type}</td>
+                            <td style={{ fontFamily: 'var(--font-mono)' }}>{t.shares == null ? '—' : fmt(t.shares, 4)}</td>
+                            <td style={{ fontFamily: 'var(--font-mono)' }}>{t.price == null ? '—' : `$${fmt(t.price, 2)}`}</td>
+                            <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 500 }}>{t.amount == null ? '—' : fmtM(t.amount)}</td>
+                            <td style={{ color: 'var(--silver-2)', fontSize: 12 }}>{t.notes || '—'}</td>
+                          </tr>
+                        ))}
+                        {transactions.length === 0 && (
+                          <tr><td colSpan={7} style={{ color: 'var(--silver-2)', textAlign: 'center', padding: 40, fontSize: 14 }}>No portfolio transactions recorded yet</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
                 {rebalance?.rows?.length > 0 && (
                   <>
                     <SectionLabel>Rebalance Plan</SectionLabel>
@@ -1016,38 +1248,6 @@ export default function Omnivex() {
                     </div>
                   </>
                 )}
-
-                <SectionLabel>Current Holdings</SectionLabel>
-                <div className="card" style={{ padding: 0, overflow: 'hidden', marginBottom: 24 }}>
-                  <div style={{ overflowX: 'auto' }}>
-                    <table className="pq-table">
-                      <thead><tr><th>Ticker</th><th>Tier</th><th>Shares</th><th>Avg Cost</th><th>Price</th><th>Value</th><th>P&L</th><th>P&L %</th><th>Risk</th><th>Stop</th><th>Target</th><th>Score</th><th>Action</th></tr></thead>
-                      <tbody>
-                        {holdings.map(h => (
-                          <tr key={h.ticker} onClick={() => setFocusTicker(h.ticker)}>
-                            <td><span style={{ fontWeight: 600, fontSize: 14 }}>{h.ticker}</span></td>
-                            <td><TierPill tier={h.tier} /></td>
-                            <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 500 }}>{fmt(h.shares,2)}</td>
-                            <td style={{ fontFamily: 'var(--font-mono)' }}>${fmt(h.avg_cost,2)}</td>
-                            <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 500 }}>${fmt(h.current_price,2)}</td>
-                            <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 500 }}>{fmtM(h.market_value)}</td>
-                            <td className={(h.unrealized_pnl||0)>=0?'c-pos':'c-neg'} style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{fmtM(h.unrealized_pnl)}</td>
-                            <td className={(h.unrealized_pnl_pct||0)>=0?'c-pos':'c-neg'} style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{fmtPct(h.unrealized_pnl_pct)}</td>
-                            <td><RiskPill risk={h.risk} /></td>
-                            <td style={{ fontFamily: 'var(--font-mono)', color: 'var(--silver-2)', fontSize: 12 }}>
-                              {h.risk?.hardStopPrice ? `$${fmt(h.risk.hardStopPrice,2)}` : '—'}
-                            </td>
-                            <td style={{ fontFamily: 'var(--font-mono)', color: 'var(--silver-2)', fontSize: 12 }}>
-                              {h.risk?.targetPrice ? `$${fmt(h.risk.targetPrice,2)}` : '—'}
-                            </td>
-                            <td><ScorePill value={h.omnivex_score} /></td>
-                            <td className={`c-${(h.action||'monitor').toLowerCase()}`} style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600 }}>{h.action||'—'}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
 
                 <SectionLabel>Trade Blotter</SectionLabel>
                 <div className="card" style={{ padding: 0, overflow: 'hidden' }}>

@@ -2,6 +2,12 @@ import { neon } from '@neondatabase/serverless'
 
 const sql = neon(process.env.POSTGRES_URL)
 
+function toNumber(value, fallback = 0) {
+  if (value == null || value === '') return fallback
+  const numeric = Number(value)
+  return Number.isFinite(numeric) ? numeric : fallback
+}
+
 const DEFAULT_RISK_POLICY = {
   stops: {
     SMART_CORE: -0.10,
@@ -297,10 +303,25 @@ export async function getHoldings() {
       AND s.run_date = (SELECT MAX(run_date) FROM runs)
     ORDER BY h.market_value DESC NULLS LAST
   `
-  return rows.map(row => ({
-    ...row,
-    risk: assessHoldingRisk(row, strategyConfig),
-  }))
+  return rows.map(row => {
+    const normalized = {
+      ...row,
+      shares: toNumber(row.shares),
+      avg_cost: toNumber(row.avg_cost),
+      current_price: toNumber(row.current_price),
+      market_value: toNumber(row.market_value),
+      unrealized_pnl: toNumber(row.unrealized_pnl),
+      unrealized_pnl_pct: toNumber(row.unrealized_pnl_pct),
+      omnivex_score: row.omnivex_score == null ? null : toNumber(row.omnivex_score),
+      qtech: row.qtech == null ? null : toNumber(row.qtech),
+      psos: row.psos == null ? null : toNumber(row.psos),
+      signal_conf: row.signal_conf == null ? null : toNumber(row.signal_conf),
+    }
+    return {
+      ...normalized,
+      risk: assessHoldingRisk(normalized, strategyConfig),
+    }
+  })
 }
 
 export async function upsertHolding(input) {
@@ -357,6 +378,179 @@ export async function upsertHolding(input) {
   }
 }
 
+export async function getPortfolioTransactions(limit = 100) {
+  try {
+    const rows = await sql`
+      SELECT *
+      FROM portfolio_transactions
+      ORDER BY transaction_date DESC, created_at DESC, id DESC
+      LIMIT ${limit}
+    `
+    return rows.map(row => ({
+      ...row,
+      shares: row.shares == null ? null : toNumber(row.shares),
+      price: row.price == null ? null : toNumber(row.price),
+      amount: row.amount == null ? null : toNumber(row.amount),
+    }))
+  } catch (error) {
+    console.warn('Portfolio transactions unavailable:', error.message)
+    return []
+  }
+}
+
+async function syncHoldingFromTransactions(ticker, currentPriceOverride = null) {
+  const txRows = await sql`
+    SELECT *
+    FROM portfolio_transactions
+    WHERE ticker = ${ticker}
+    ORDER BY transaction_date ASC, id ASC
+  `
+
+  if (!txRows.length) {
+    return null
+  }
+
+  const existingHoldingRows = await sql`
+    SELECT *
+    FROM holdings
+    WHERE ticker = ${ticker}
+    LIMIT 1
+  `
+  const existingHolding = existingHoldingRows[0] || null
+
+  let shares = 0
+  let totalCost = 0
+  let dateEntered = null
+  let lastPrice = null
+
+  txRows.forEach(row => {
+    const txType = String(row.transaction_type || '').toUpperCase()
+    const txShares = toNumber(row.shares)
+    const txPrice = row.price == null ? null : toNumber(row.price)
+    const txAmount = row.amount == null ? null : toNumber(row.amount)
+
+    if (!dateEntered && (txType === 'BUY' || txType === 'DRIP') && txShares > 0) {
+      dateEntered = row.transaction_date
+    }
+
+    if (txPrice && txPrice > 0) {
+      lastPrice = txPrice
+    }
+
+    if (txType === 'BUY' || txType === 'DRIP') {
+      if (txShares <= 0) return
+      shares += txShares
+      totalCost += txAmount != null && txAmount > 0 ? txAmount : txShares * toNumber(txPrice)
+      return
+    }
+
+    if (txType === 'SELL') {
+      if (txShares <= 0 || shares <= 0) return
+      const sellShares = Math.min(txShares, shares)
+      const avgCost = shares > 0 ? totalCost / shares : 0
+      totalCost = Math.max(0, totalCost - (avgCost * sellShares))
+      shares = Math.max(0, shares - sellShares)
+    }
+  })
+
+  if (shares <= 0) {
+    await sql`DELETE FROM holdings WHERE ticker = ${ticker}`
+    return null
+  }
+
+  const avgCost = shares > 0 ? totalCost / shares : 0
+  const currentPrice = currentPriceOverride != null && currentPriceOverride !== ''
+    ? toNumber(currentPriceOverride)
+    : (existingHolding?.current_price != null ? toNumber(existingHolding.current_price) : (lastPrice ?? avgCost))
+  const marketValue = shares * currentPrice
+  const unrealizedPnl = shares * (currentPrice - avgCost)
+  const unrealizedPnlPct = avgCost > 0 ? ((currentPrice / avgCost) - 1) * 100 : 0
+
+  const latestScoreRows = await sql`
+    SELECT tier
+    FROM scores
+    WHERE ticker = ${ticker}
+      AND run_date = (SELECT MAX(run_date) FROM runs)
+    LIMIT 1
+  `
+  const tier = latestScoreRows[0]?.tier || existingHolding?.tier || 'MONITOR'
+
+  const rows = await sql`
+    INSERT INTO holdings (
+      ticker, shares, avg_cost, current_price, market_value,
+      unrealized_pnl, unrealized_pnl_pct, tier, date_entered, updated_at
+    ) VALUES (
+      ${ticker}, ${shares}, ${avgCost}, ${currentPrice}, ${marketValue},
+      ${unrealizedPnl}, ${unrealizedPnlPct}, ${tier}, ${dateEntered}::date, NOW()
+    )
+    ON CONFLICT (ticker) DO UPDATE SET
+      shares = EXCLUDED.shares,
+      avg_cost = EXCLUDED.avg_cost,
+      current_price = EXCLUDED.current_price,
+      market_value = EXCLUDED.market_value,
+      unrealized_pnl = EXCLUDED.unrealized_pnl,
+      unrealized_pnl_pct = EXCLUDED.unrealized_pnl_pct,
+      tier = EXCLUDED.tier,
+      date_entered = COALESCE(EXCLUDED.date_entered, holdings.date_entered),
+      updated_at = NOW()
+    RETURNING *
+  `
+
+  const strategyConfig = await getLatestStrategyConfig()
+  return {
+    ...rows[0],
+    risk: assessHoldingRisk(rows[0], strategyConfig),
+  }
+}
+
+export async function insertPortfolioTransaction(input) {
+  const ticker = String(input?.ticker || '').trim().toUpperCase()
+  const transactionType = String(input?.transactionType || '').trim().toUpperCase()
+  const transactionDate = input?.transactionDate || null
+  const shares = input?.shares == null || input.shares === '' ? null : Number(input.shares)
+  const price = input?.price == null || input.price === '' ? null : Number(input.price)
+  const amount = input?.amount == null || input.amount === '' ? null : Number(input.amount)
+  const currentPrice = input?.currentPrice == null || input.currentPrice === '' ? null : Number(input.currentPrice)
+  const notes = input?.notes ? String(input.notes).trim() : null
+
+  if (!ticker) throw new Error('Ticker is required')
+  if (!transactionDate) throw new Error('Transaction date is required')
+  if (!['BUY', 'SELL', 'DRIP', 'DIVIDEND'].includes(transactionType)) {
+    throw new Error('Transaction type must be BUY, SELL, DRIP, or DIVIDEND')
+  }
+
+  if (transactionType === 'DIVIDEND') {
+    if (!(amount > 0)) throw new Error('Dividend amount must be greater than 0')
+  } else {
+    if (!(shares > 0)) throw new Error('Shares must be greater than 0')
+    if (!(price > 0)) throw new Error('Price must be greater than 0')
+  }
+
+  const effectiveAmount = amount != null
+    ? amount
+    : ((shares != null && price != null) ? Number((shares * price).toFixed(2)) : null)
+
+  const rows = await sql`
+    INSERT INTO portfolio_transactions (
+      transaction_date, ticker, transaction_type, shares, price, amount, notes, created_at
+    ) VALUES (
+      ${transactionDate}::date, ${ticker}, ${transactionType}, ${shares}, ${price}, ${effectiveAmount}, ${notes}, NOW()
+    )
+    RETURNING *
+  `
+
+  const holding = await syncHoldingFromTransactions(ticker, currentPrice)
+  return {
+    transaction: {
+      ...rows[0],
+      shares: rows[0].shares == null ? null : toNumber(rows[0].shares),
+      price: rows[0].price == null ? null : toNumber(rows[0].price),
+      amount: rows[0].amount == null ? null : toNumber(rows[0].amount),
+    },
+    holding,
+  }
+}
+
 export async function getTrades(limit = 100) {
   const rows = await sql`
     SELECT * FROM trades ORDER BY trade_date DESC, created_at DESC LIMIT ${limit}
@@ -402,7 +596,13 @@ export async function getAllocationSummary() {
       AND s.run_date = (SELECT MAX(run_date) FROM runs)
     GROUP BY h.tier ORDER BY total_value DESC NULLS LAST
   `
-  return rows
+  return rows.map(row => ({
+    ...row,
+    positions: toNumber(row.positions),
+    total_value: toNumber(row.total_value),
+    total_pnl: toNumber(row.total_pnl),
+    avg_score: row.avg_score == null ? null : toNumber(row.avg_score),
+  }))
 }
 
 export async function getPerformanceVsSpy(days = 90) {
@@ -422,7 +622,16 @@ export async function getRebalancePlan() {
     SELECT ticker, avg_cost, current_price, unrealized_pnl_pct, tier, market_value, shares
     FROM holdings
   `
-  const holdingBasis = new Map(holdingBasisRows.map(row => [row.ticker, row]))
+  const normalizedHoldings = holdingBasisRows.map(row => ({
+    ...row,
+    avg_cost: toNumber(row.avg_cost),
+    current_price: toNumber(row.current_price),
+    unrealized_pnl_pct: toNumber(row.unrealized_pnl_pct),
+    market_value: toNumber(row.market_value),
+    shares: toNumber(row.shares),
+  }))
+  const holdingBasis = new Map(normalizedHoldings.map(row => [row.ticker, row]))
+  const liveHoldingsValue = normalizedHoldings.reduce((sum, row) => sum + toNumber(row.market_value), 0)
   try {
     const summaryRows = await sql`
       SELECT *
@@ -448,23 +657,57 @@ export async function getRebalancePlan() {
           ABS(delta_value) DESC
       `
 
+      const latestSnapshot = await getLatestSnapshot()
+      const currentCash = latestSnapshot?.cash == null ? toNumber(summary.current_cash) : toNumber(latestSnapshot.cash)
+      const totalPortfolioValue =
+        toNumber(summary.portfolio_base_value) > 0
+          ? Math.max(toNumber(summary.portfolio_base_value), liveHoldingsValue + currentCash)
+          : liveHoldingsValue + currentCash
+      const currentAlloc = {
+        SMART_CORE: 0,
+        TACTICAL: 0,
+        SPECULATIVE: 0,
+        CASH: totalPortfolioValue > 0 ? (currentCash / totalPortfolioValue) * 100 : 0,
+      }
+      normalizedHoldings.forEach(holding => {
+        const tier = normalizeTier(holding.tier)
+        if (tier in currentAlloc) {
+          currentAlloc[tier] += totalPortfolioValue > 0 ? (holding.market_value / totalPortfolioValue) * 100 : 0
+        }
+      })
+
       return {
         mode: summary.mode,
-        totalPortfolioValue: Number(summary.portfolio_base_value || 0),
-        cash: Number(summary.current_cash || 0),
-        rows: rows.map(row => ({
-          ...row,
-          omnivex_score: row.omnivex_score == null ? null : Number(row.omnivex_score),
-          signal_conf: row.signal_conf == null ? null : Number(row.signal_conf),
-          current_weight_pct: Number(row.current_weight_pct || 0),
-          target_weight_pct: Number(row.target_weight_pct || 0),
-          current_value: Number(row.current_value || 0),
-          target_value: Number(row.target_value || 0),
-          delta_weight_pct: Number(row.delta_weight_pct || 0),
-          delta_value: Number(row.delta_value || 0),
-          held: Boolean(row.held),
-          risk: row.held ? assessHoldingRisk({ ...holdingBasis.get(row.ticker), ...row }, strategyConfig) : null,
-        })),
+        totalPortfolioValue,
+        cash: currentCash,
+        rows: rows.map(row => {
+          const holding = holdingBasis.get(row.ticker)
+          const currentValue = toNumber(holding?.market_value)
+          const currentWeightPct = totalPortfolioValue > 0
+            ? Number((((currentValue) / totalPortfolioValue) * 100).toFixed(2))
+            : 0
+          const targetWeightPct = Number(row.target_weight_pct || 0)
+          const targetValue = Number((totalPortfolioValue * (targetWeightPct / 100)).toFixed(2))
+          const deltaValue = Number((targetValue - currentValue).toFixed(2))
+          const currentlyHeld = toNumber(holding?.shares) > 0 || currentValue > 0
+          const recommendation = currentlyHeld && row.recommendation === 'OPEN'
+            ? 'ADD'
+            : row.recommendation
+          return {
+            ...row,
+            recommendation,
+            omnivex_score: row.omnivex_score == null ? null : Number(row.omnivex_score),
+            signal_conf: row.signal_conf == null ? null : Number(row.signal_conf),
+            current_weight_pct: currentWeightPct,
+            target_weight_pct: targetWeightPct,
+            current_value: currentValue,
+            target_value: targetValue,
+            delta_weight_pct: Number((targetWeightPct - currentWeightPct).toFixed(2)),
+            delta_value: deltaValue,
+            held: currentlyHeld,
+            risk: currentlyHeld ? assessHoldingRisk({ ...holding, ...row }, strategyConfig) : null,
+          }
+        }),
         summary: {
           buyCount: rows.filter(row => row.recommendation === 'ADD').length,
           trimCount: rows.filter(row => row.recommendation === 'TRIM').length,
@@ -481,12 +724,7 @@ export async function getRebalancePlan() {
           SPECULATIVE: Number(summary.target_speculative_pct || 0),
           CASH: Number(summary.target_cash_pct || 0),
         },
-        currentAlloc: {
-          SMART_CORE: Number(summary.current_smart_core_pct || 0),
-          TACTICAL: Number(summary.current_tactical_pct || 0),
-          SPECULATIVE: Number(summary.current_speculative_pct || 0),
-          CASH: Number(summary.current_cash_pct || 0),
-        },
+        currentAlloc,
       }
     }
   } catch (error) {

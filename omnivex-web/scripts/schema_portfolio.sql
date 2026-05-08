@@ -77,6 +77,25 @@ CREATE INDEX IF NOT EXISTS idx_snapshots_date ON portfolio_snapshots(snapshot_da
 CREATE INDEX IF NOT EXISTS idx_tier_perf_date ON tier_performance(snapshot_date);
 CREATE INDEX IF NOT EXISTS idx_holdings_ticker ON holdings(ticker);
 
+-- Portfolio transaction ledger (source of truth for aggregated holdings)
+CREATE TABLE IF NOT EXISTS portfolio_transactions (
+    id                SERIAL PRIMARY KEY,
+    transaction_date  DATE NOT NULL,
+    ticker            VARCHAR(10) NOT NULL,
+    transaction_type  VARCHAR(20) NOT NULL, -- BUY/SELL/DRIP/DIVIDEND
+    shares            DECIMAL(14,6),
+    price             DECIMAL(14,6),
+    amount            DECIMAL(14,2),
+    notes             TEXT,
+    created_at        TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_portfolio_transactions_date
+    ON portfolio_transactions(transaction_date DESC);
+
+CREATE INDEX IF NOT EXISTS idx_portfolio_transactions_ticker
+    ON portfolio_transactions(ticker, transaction_date DESC);
+
 -- Allocator output: daily target book and rebalance plan
 CREATE TABLE IF NOT EXISTS portfolio_target_summary (
     run_date                 DATE PRIMARY KEY,
