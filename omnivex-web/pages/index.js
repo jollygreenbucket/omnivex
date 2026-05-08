@@ -228,6 +228,10 @@ export default function Omnivex() {
     transactionDate: '',
     notes: '',
   })
+  const [resettingTicker, setResettingTicker] = useState(false)
+  const [resetError, setResetError] = useState(null)
+  const [resetSuccess, setResetSuccess] = useState(null)
+  const [resetTicker, setResetTicker] = useState('')
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [tierF, setTierF] = useState('ALL')
@@ -438,6 +442,32 @@ export default function Omnivex() {
       setTransactionError(err.message)
     } finally {
       setSavingTransaction(false)
+    }
+  }
+
+  async function handleResetTicker(e) {
+    e.preventDefault()
+    setResettingTicker(true)
+    setResetError(null)
+    setResetSuccess(null)
+
+    try {
+      const response = await fetch('/api/portfolio', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticker: resetTicker }),
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'Failed to reset ticker')
+
+      setResetSuccess(`${data.ticker} reset`)
+      setResetTicker('')
+      const refreshed = await fetch('/api/portfolio').then(r => r.json())
+      setPortData(refreshed)
+    } catch (err) {
+      setResetError(err.message)
+    } finally {
+      setResettingTicker(false)
     }
   }
 
@@ -1054,6 +1084,55 @@ export default function Omnivex() {
               {transactionError && (
                 <div style={{ marginTop: 10, color: 'var(--hedge)', fontSize: 12 }}>
                   {transactionError}
+                </div>
+              )}
+            </div>
+
+            <div className="card" style={{ marginBottom: 20 }}>
+              <div className="label" style={{ marginBottom: 14, fontSize: 11 }}>Reset Ticker</div>
+              <form onSubmit={handleResetTicker}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 12, alignItems: 'end' }}>
+                  <div>
+                    <div className="label" style={{ marginBottom: 6, fontSize: 10 }}>Ticker</div>
+                    <input
+                      className="pq-input"
+                      value={resetTicker}
+                      onChange={e => setResetTicker(e.target.value.toUpperCase())}
+                      placeholder="AVGO"
+                      maxLength={10}
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={resettingTicker || !resetTicker}
+                    style={{
+                      background: resettingTicker || !resetTicker ? '#232840' : 'var(--hedge)',
+                      color: resettingTicker || !resetTicker ? '#9aa3c7' : '#fff',
+                      border: 'none',
+                      borderRadius: 6,
+                      padding: '10px 16px',
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: 12,
+                      fontWeight: 700,
+                      letterSpacing: '.04em',
+                      cursor: resettingTicker || !resetTicker ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    {resettingTicker ? 'Resetting...' : 'Reset Ticker'}
+                  </button>
+                </div>
+              </form>
+              <div style={{ marginTop: 10, color: 'var(--silver-2)', fontSize: 12 }}>
+                This removes the ticker from both `holdings` and the portfolio transaction ledger so you can rebuild it cleanly from original buys and DRIPs.
+              </div>
+              {resetSuccess && (
+                <div style={{ marginTop: 10, color: '#2de0aa', fontSize: 12 }}>
+                  {resetSuccess}
+                </div>
+              )}
+              {resetError && (
+                <div style={{ marginTop: 10, color: 'var(--hedge)', fontSize: 12 }}>
+                  {resetError}
                 </div>
               )}
             </div>

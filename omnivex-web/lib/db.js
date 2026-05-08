@@ -551,6 +551,30 @@ export async function insertPortfolioTransaction(input) {
   }
 }
 
+export async function resetPortfolioTicker(input) {
+  const ticker = String(input?.ticker || '').trim().toUpperCase()
+  if (!ticker) throw new Error('Ticker is required')
+
+  const [deletedTransactions, deletedHoldings] = await Promise.all([
+    sql`
+      DELETE FROM portfolio_transactions
+      WHERE ticker = ${ticker}
+      RETURNING id
+    `.catch(() => []),
+    sql`
+      DELETE FROM holdings
+      WHERE ticker = ${ticker}
+      RETURNING id
+    `,
+  ])
+
+  return {
+    ticker,
+    deletedTransactions: Array.isArray(deletedTransactions) ? deletedTransactions.length : 0,
+    deletedHoldings: Array.isArray(deletedHoldings) ? deletedHoldings.length : 0,
+  }
+}
+
 export async function getTrades(limit = 100) {
   const rows = await sql`
     SELECT * FROM trades ORDER BY trade_date DESC, created_at DESC LIMIT ${limit}

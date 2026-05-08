@@ -1,7 +1,7 @@
 import {
   getHoldings, getTrades, getPortfolioSnapshots,
   getTierPerformance, getLatestSnapshot, getAllocationSummary,
-  getPerformanceVsSpy, getRebalancePlan, getPortfolioTransactions, upsertHolding
+  getPerformanceVsSpy, getRebalancePlan, getPortfolioTransactions, resetPortfolioTicker, upsertHolding
 } from '../../lib/db'
 
 export default async function handler(req, res) {
@@ -9,6 +9,11 @@ export default async function handler(req, res) {
     if (req.method === 'POST') {
       const holding = await upsertHolding(req.body || {})
       return res.status(200).json({ holding })
+    }
+
+    if (req.method === 'DELETE') {
+      const result = await resetPortfolioTicker(req.body || {})
+      return res.status(200).json(result)
     }
 
     if (req.method !== 'GET') return res.status(405).end()
